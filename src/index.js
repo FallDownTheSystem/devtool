@@ -11,7 +11,9 @@ const program = new Command();
 program
 	.name('dev')
 	.description('CLI for Bitbucket PRs and Jira tickets')
-	.version('0.1.0');
+	.version('0.1.0')
+	.option('--json', 'Output raw JSON')
+	.option('--plain', 'Output compact plain text (no tables, no colors)');
 
 program.addCommand(configCmd);
 program.addCommand(prCmd);

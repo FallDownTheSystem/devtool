@@ -60,6 +60,97 @@ function extractStoryPoints(fields) {
 	return null;
 }
 
+function descriptionText(desc) {
+	if (!desc) return '';
+	return typeof desc === 'string' ? desc : JSON.stringify(desc);
+}
+
+// --- JSON curators ---
+
+export function curateIssueJson(issue) {
+	const f = issue.fields;
+	return {
+		key: issue.key,
+		summary: f.summary,
+		status: f.status?.name || null,
+		priority: f.priority?.name || null,
+		type: f.issuetype?.name || null,
+		assignee: f.assignee?.displayName || null,
+		reporter: f.reporter?.displayName || null,
+		labels: f.labels || [],
+		components: (f.components || []).map((c) => c.name),
+		sprint: extractSprint(f),
+		storyPoints: extractStoryPoints(f),
+		created: f.created,
+		updated: f.updated,
+		description: descriptionText(f.description),
+	};
+}
+
+export function curateCommentsJson(comments) {
+	return comments.map((c) => ({
+		author: c.author?.displayName || null,
+		date: c.created,
+		body: typeof c.body === 'string' ? c.body : JSON.stringify(c.body || ''),
+	}));
+}
+
+export function curateSearchJson(result) {
+	return {
+		total: result.total,
+		issues: result.issues.map((issue) => ({
+			key: issue.key,
+			summary: issue.fields.summary,
+			status: issue.fields.status?.name || null,
+			assignee: issue.fields.assignee?.displayName || null,
+			priority: issue.fields.priority?.name || null,
+			updated: issue.fields.updated,
+		})),
+	};
+}
+
+// --- Plain formatters ---
+
+export function plainIssueView(issue) {
+	const f = issue.fields;
+	console.log(`${issue.key} ${f.summary}`);
+	console.log(`Status: ${f.status?.name || 'Unknown'}`);
+	console.log(`Priority: ${f.priority?.name || 'None'}`);
+	console.log(`Type: ${f.issuetype?.name || 'Unknown'}`);
+	console.log(`Assignee: ${f.assignee?.displayName || 'Unassigned'}`);
+	console.log(`Reporter: ${f.reporter?.displayName || 'Unknown'}`);
+	if (f.labels?.length > 0) console.log(`Labels: ${f.labels.join(', ')}`);
+	if (f.components?.length > 0) console.log(`Components: ${f.components.map((c) => c.name).join(', ')}`);
+	const sprint = extractSprint(f);
+	if (sprint) console.log(`Sprint: ${sprint}`);
+	const points = extractStoryPoints(f);
+	if (points) console.log(`Story Points: ${points}`);
+	console.log(`Created: ${f.created}`);
+	console.log(`Updated: ${f.updated}`);
+	const desc = descriptionText(f.description);
+	if (desc) console.log(`Description:\n${desc.trim()}`);
+}
+
+export function plainIssueComments(comments) {
+	if (comments.length === 0) { console.log('No comments.'); return; }
+	for (const c of comments) {
+		const body = typeof c.body === 'string' ? c.body : JSON.stringify(c.body || '');
+		console.log(`${c.author?.displayName || 'Unknown'} (${relativeTime(c.created)}): ${body.trim()}`);
+	}
+}
+
+export function plainIssueSearch(result) {
+	if (result.issues.length === 0) { console.log('No issues found.'); return; }
+	for (const issue of result.issues) {
+		const f = issue.fields;
+		console.log(`${issue.key} [${f.status?.name}] "${f.summary}" - ${f.assignee?.displayName || 'Unassigned'} (${f.priority?.name}, ${relativeTime(f.updated)})`);
+	}
+	const showing = result.startAt + result.issues.length;
+	if (result.total > showing) console.log(`Showing ${result.startAt + 1}-${showing} of ${result.total}`);
+}
+
+// --- Rich formatters (original) ---
+
 export function formatIssueView(issue) {
 	const f = issue.fields;
 
@@ -84,7 +175,7 @@ export function formatIssueView(issue) {
 
 	if (f.description) {
 		heading('Description');
-		const desc = typeof f.description === 'string' ? f.description : JSON.stringify(f.description);
+		const desc = descriptionText(f.description);
 		const lines = desc.trim().split('\n');
 		const truncated = lines.slice(0, 30);
 		for (const line of truncated) {

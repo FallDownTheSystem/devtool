@@ -1,9 +1,25 @@
 import pc from 'picocolors';
-import { createSpinner } from 'nanospinner';
 import Table from 'cli-table3';
 
+const HIDE_CURSOR = '\x1B[?25l';
+const SHOW_CURSOR = '\x1B[?25h';
+const CLEAR_LINE = '\x1B[2K\r';
+
 export function spinner(text) {
-	return createSpinner(text);
+	return {
+		start() {
+			process.stdout.write(`${HIDE_CURSOR}${pc.dim('–')} ${text}`);
+			return this;
+		},
+		success({ text: msg } = {}) {
+			process.stdout.write(`${CLEAR_LINE}${pc.green('✓')} ${msg || text}${SHOW_CURSOR}\n`);
+			return this;
+		},
+		error({ text: msg } = {}) {
+			process.stdout.write(`${CLEAR_LINE}${pc.red('✗')} ${msg || text}${SHOW_CURSOR}\n`);
+			return this;
+		},
+	};
 }
 
 export function table(head, rows, options = {}) {

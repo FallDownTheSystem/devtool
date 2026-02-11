@@ -6,40 +6,47 @@ import {
 	getMyIssues,
 } from '../clients/jira.js';
 import {
-	formatIssueView,
-	formatIssueComments,
-	formatIssueSearch,
+	formatIssueView, formatIssueComments, formatIssueSearch,
+	plainIssueView, plainIssueComments, plainIssueSearch,
+	curateIssueJson, curateCommentsJson, curateSearchJson,
 } from '../formatters/jira.js';
 import { spinner } from '../utils/output.js';
 import { handleError } from '../utils/errors.js';
+import { getOutputMode, outputJson } from '../utils/mode.js';
 
 const jira = new Command('jira')
 	.description('Jira tickets');
 
 jira.command('view <key>')
 	.description('View issue details')
-	.action(async (key) => {
-		const s = spinner(`Fetching ${key}...`).start();
+	.action(async function (key) {
+		const mode = getOutputMode(this);
+		const s = mode === 'rich' ? spinner(`Fetching ${key}...`).start() : null;
 		try {
 			const issue = await getIssue(key);
-			s.success({ text: key });
-			formatIssueView(issue);
+			if (s) s.success({ text: key });
+			if (mode === 'json') outputJson(curateIssueJson(issue));
+			else if (mode === 'plain') plainIssueView(issue);
+			else formatIssueView(issue);
 		} catch (err) {
-			s.error({ text: `Failed to fetch ${key}` });
+			if (s) s.error({ text: `Failed to fetch ${key}` });
 			handleError(err, `jira issue ${key}`);
 		}
 	});
 
 jira.command('comments <key>')
 	.description('List issue comments')
-	.action(async (key) => {
-		const s = spinner(`Fetching comments for ${key}...`).start();
+	.action(async function (key) {
+		const mode = getOutputMode(this);
+		const s = mode === 'rich' ? spinner(`Fetching comments for ${key}...`).start() : null;
 		try {
 			const comments = await getIssueComments(key);
-			s.success({ text: `${comments.length} comment(s)` });
-			formatIssueComments(comments);
+			if (s) s.success({ text: `${comments.length} comment(s)` });
+			if (mode === 'json') outputJson(curateCommentsJson(comments));
+			else if (mode === 'plain') plainIssueComments(comments);
+			else formatIssueComments(comments);
 		} catch (err) {
-			s.error({ text: `Failed to fetch comments for ${key}` });
+			if (s) s.error({ text: `Failed to fetch comments for ${key}` });
 			handleError(err, `jira comments ${key}`);
 		}
 	});
@@ -48,30 +55,36 @@ jira.command('search <jql>')
 	.description('Search issues with JQL')
 	.option('-p, --page <number>', 'Page number', '1')
 	.option('-n, --per-page <number>', 'Results per page', '20')
-	.action(async (jql, opts) => {
+	.action(async function (jql, opts) {
+		const mode = getOutputMode(this);
 		const perPage = parseInt(opts.perPage, 10);
 		const startAt = (parseInt(opts.page, 10) - 1) * perPage;
-		const s = spinner('Searching...').start();
+		const s = mode === 'rich' ? spinner('Searching...').start() : null;
 		try {
 			const result = await searchIssues(jql, startAt, perPage);
-			s.success({ text: `${result.total} issue(s) matched` });
-			formatIssueSearch(result);
+			if (s) s.success({ text: `${result.total} issue(s) matched` });
+			if (mode === 'json') outputJson(curateSearchJson(result));
+			else if (mode === 'plain') plainIssueSearch(result);
+			else formatIssueSearch(result);
 		} catch (err) {
-			s.error({ text: 'Search failed' });
+			if (s) s.error({ text: 'Search failed' });
 			handleError(err, `jira search "${jql}"`);
 		}
 	});
 
 jira.command('mine')
 	.description('Show my open issues')
-	.action(async () => {
-		const s = spinner('Fetching my issues...').start();
+	.action(async function () {
+		const mode = getOutputMode(this);
+		const s = mode === 'rich' ? spinner('Fetching my issues...').start() : null;
 		try {
 			const result = await getMyIssues();
-			s.success({ text: `${result.total} issue(s)` });
-			formatIssueSearch(result);
+			if (s) s.success({ text: `${result.total} issue(s)` });
+			if (mode === 'json') outputJson(curateSearchJson(result));
+			else if (mode === 'plain') plainIssueSearch(result);
+			else formatIssueSearch(result);
 		} catch (err) {
-			s.error({ text: 'Failed to fetch issues' });
+			if (s) s.error({ text: 'Failed to fetch issues' });
 			handleError(err, 'jira my issues');
 		}
 	});
