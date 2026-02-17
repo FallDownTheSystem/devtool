@@ -20,6 +20,15 @@ const schema = {
 			defaultProject: { type: 'string' },
 		},
 	},
+	confluence: {
+		type: 'object',
+		properties: {
+			baseUrl: { type: 'string' },
+			email: { type: 'string' },
+			token: { type: 'string' },
+			defaultSpace: { type: 'string' },
+		},
+	},
 };
 
 const config = new Conf({
@@ -28,6 +37,7 @@ const config = new Conf({
 	defaults: {
 		bitbucket: { workspace: '', defaultRepo: '', email: '', token: '' },
 		jira: { baseUrl: '', token: '', defaultProject: '' },
+		confluence: { baseUrl: '', email: '', token: '', defaultSpace: '' },
 	},
 });
 
@@ -110,8 +120,35 @@ export async function runSetup() {
 		},
 	});
 
+	const confluence = await p.group({
+		baseUrl: () => p.text({
+			message: 'Confluence Cloud base URL',
+			placeholder: 'https://company.atlassian.net',
+			initialValue: config.get('confluence.baseUrl') || '',
+		}),
+		email: () => p.text({
+			message: 'Confluence account email',
+			placeholder: 'you@company.com',
+			initialValue: config.get('confluence.email') || '',
+		}),
+		token: () => p.password({
+			message: 'Confluence API token',
+		}),
+		defaultSpace: () => p.text({
+			message: 'Confluence default space key',
+			placeholder: 'DEV',
+			initialValue: config.get('confluence.defaultSpace') || '',
+		}),
+	}, {
+		onCancel: () => {
+			p.cancel('Setup cancelled.');
+			process.exit(0);
+		},
+	});
+
 	config.set('bitbucket', bb);
 	config.set('jira', jira);
+	config.set('confluence', confluence);
 
 	p.outro(pc.green('Configuration saved!'));
 }

@@ -2,7 +2,7 @@ import { error } from './output.js';
 
 export function handleError(err, context = '') {
 	if (err.status === 401 || err.statusCode === 401) {
-		const service = context.includes('bitbucket') ? 'Bitbucket' : context.includes('jira') ? 'Jira' : '';
+		const service = context.includes('bitbucket') ? 'Bitbucket' : context.includes('jira') ? 'Jira' : context.includes('confluence') ? 'Confluence' : '';
 		error(`Authentication failed${service ? ` for ${service}` : ''}. Check your API token.`);
 		if (context) error(`Endpoint: ${context}`);
 		process.exitCode = 1;

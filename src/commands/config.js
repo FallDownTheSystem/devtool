@@ -34,6 +34,12 @@ config
 		field('Token', mask(all.jira.token));
 		field('Default project', all.jira.defaultProject);
 
+		heading('Confluence');
+		field('Base URL', all.confluence.baseUrl);
+		field('Email', all.confluence.email);
+		field('Token', mask(all.confluence.token));
+		field('Default space', all.confluence.defaultSpace);
+
 		console.log('');
 		divider();
 		field('Config file', configPath());
@@ -47,6 +53,7 @@ config
 		const validKeys = [
 			'bitbucket.workspace', 'bitbucket.defaultRepo', 'bitbucket.email', 'bitbucket.token',
 			'jira.baseUrl', 'jira.token', 'jira.defaultProject',
+			'confluence.baseUrl', 'confluence.email', 'confluence.token', 'confluence.defaultSpace',
 		];
 		if (!validKeys.includes(key)) {
 			error(`Invalid key: ${key}`);
