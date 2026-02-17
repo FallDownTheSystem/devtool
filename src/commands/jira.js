@@ -18,6 +18,7 @@ const jira = new Command('jira')
 	.description('Jira tickets');
 
 jira.command('view <key>')
+	.alias('read')
 	.description('View issue details')
 	.action(async function (key) {
 		const mode = getOutputMode(this);
@@ -52,6 +53,7 @@ jira.command('comments <key>')
 	});
 
 jira.command('search <jql>')
+	.alias('find')
 	.description('Search issues with JQL')
 	.option('-p, --page <number>', 'Page number', '1')
 	.option('-n, --per-page <number>', 'Results per page', '20')
@@ -73,6 +75,7 @@ jira.command('search <jql>')
 	});
 
 jira.command('mine')
+	.alias('my')
 	.description('Show my open issues')
 	.action(async function () {
 		const mode = getOutputMode(this);

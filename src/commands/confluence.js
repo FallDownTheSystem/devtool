@@ -36,6 +36,7 @@ confluence.command('spaces')
 	});
 
 confluence.command('view <id>')
+	.alias('read')
 	.description('View a page')
 	.action(async function (id) {
 		const mode = getOutputMode(this);
@@ -53,6 +54,7 @@ confluence.command('view <id>')
 	});
 
 confluence.command('pages')
+	.alias('ls')
 	.description('List pages in a space')
 	.option('-s, --space <key>', 'Space key (overrides default)')
 	.option('--space-id <id>', 'Space ID (skip key lookup)')
@@ -90,6 +92,7 @@ confluence.command('pages')
 	});
 
 confluence.command('search <cql>')
+	.alias('find')
 	.description('Search pages with CQL')
 	.action(async function (cql) {
 		const mode = getOutputMode(this);

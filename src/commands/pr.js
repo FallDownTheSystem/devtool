@@ -36,6 +36,7 @@ const pr = new Command('pr')
 	.description('Bitbucket pull requests');
 
 pr.command('list')
+	.alias('ls')
 	.description('List pull requests')
 	.option('-s, --state <state>', 'PR state (OPEN, MERGED, DECLINED)', 'OPEN')
 	.option('-a, --author <name>', 'Filter by author')
@@ -56,6 +57,7 @@ pr.command('list')
 	});
 
 pr.command('view <id>')
+	.alias('read')
 	.description('View pull request details')
 	.option('-r, --repo <slug>', 'Repository slug (overrides default)')
 	.action(async function (id, opts) {

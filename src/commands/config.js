@@ -14,6 +14,7 @@ config
 
 config
 	.command('show')
+	.alias('get')
 	.description('Show current configuration')
 	.action(() => {
 		if (!isConfigured()) {
