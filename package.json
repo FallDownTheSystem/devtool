@@ -1,7 +1,7 @@
 {
-	"name": "devtool",
-	"version": "0.1.0",
-	"description": "CLI for Bitbucket PRs and Jira tickets",
+	"name": "@falldownthesystem/devtool",
+	"version": "0.2.0",
+	"description": "CLI for Bitbucket PRs, Jira tickets, and Confluence pages",
 	"type": "module",
 	"bin": {
 		"dev": "src/index.js"
