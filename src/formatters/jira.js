@@ -109,6 +109,23 @@ export function curateSearchJson(result) {
 	};
 }
 
+export function curateChildrenJson(result) {
+	return {
+		parent: result.parent,
+		source: result.source,
+		total: result.total,
+		issues: result.issues.map((issue) => ({
+			key: issue.key,
+			summary: issue.fields?.summary || null,
+			status: issue.fields?.status?.name || null,
+			type: issue.fields?.issuetype?.name || null,
+			assignee: issue.fields?.assignee?.displayName || null,
+			priority: issue.fields?.priority?.name || null,
+			updated: issue.fields?.updated || null,
+		})),
+	};
+}
+
 // --- Plain formatters ---
 
 export function plainIssueView(issue) {
@@ -147,6 +164,27 @@ export function plainIssueSearch(result) {
 	}
 	const showing = result.startAt + result.issues.length;
 	if (result.total > showing) console.log(`Showing ${result.startAt + 1}-${showing} of ${result.total}`);
+}
+
+export function plainIssueChildren(result) {
+	const label = result.source === 'epic' ? 'epic children' : 'subtasks';
+	console.log(`${result.parent.key} (${result.parent.type}) "${result.parent.summary}" - ${result.total} ${label}`);
+	if (result.issues.length === 0) { console.log('None.'); return; }
+	for (const issue of result.issues) {
+		const f = issue.fields || {};
+		const parts = [
+			`${issue.key}`,
+			f.status?.name ? `[${f.status.name}]` : null,
+			f.issuetype?.name ? `(${f.issuetype.name})` : null,
+			f.summary ? `"${f.summary}"` : null,
+		].filter(Boolean);
+		const meta = [
+			f.assignee?.displayName || null,
+			f.priority?.name || null,
+			f.updated ? relativeTime(f.updated) : null,
+		].filter(Boolean).join(', ');
+		console.log(`${parts.join(' ')}${meta ? ` - ${meta}` : ''}`);
+	}
 }
 
 // --- Rich formatters (original) ---
@@ -232,5 +270,38 @@ export function formatIssueSearch(result) {
 	if (total > showing) {
 		console.log(pc.dim(`  Showing ${startAt + 1}-${showing} of ${total} results`));
 	}
+	console.log('');
+}
+
+export function formatIssueChildren(result) {
+	const { issues, parent, source } = result;
+	const label = source === 'epic' ? 'children' : 'subtasks';
+
+	heading(`${parent.key} ${parent.summary}`);
+	console.log(pc.dim(`  ${parent.type} · ${result.total} ${label}`));
+	divider();
+
+	if (issues.length === 0) {
+		console.log(pc.dim('  None.'));
+		console.log('');
+		return;
+	}
+
+	const rows = issues.map((issue) => {
+		const f = issue.fields || {};
+		return [
+			pc.bold(issue.key),
+			(f.summary || '').length > 50
+				? f.summary.slice(0, 47) + '...'
+				: f.summary || '',
+			f.issuetype?.name || pc.dim('—'),
+			statusColor(f.status?.name),
+			f.assignee?.displayName || pc.dim('Unassigned'),
+			priorityColor(f.priority?.name),
+			f.updated ? relativeTime(f.updated) : pc.dim('—'),
+		];
+	});
+
+	console.log(table(['Key', 'Summary', 'Type', 'Status', 'Assignee', 'Priority', 'Updated'], rows));
 	console.log('');
 }

@@ -4,11 +4,13 @@ import {
 	getIssueComments,
 	searchIssues,
 	getMyIssues,
+	getIssueChildren,
 } from '../clients/jira.js';
 import {
 	formatIssueView, formatIssueComments, formatIssueSearch,
 	plainIssueView, plainIssueComments, plainIssueSearch,
 	curateIssueJson, curateCommentsJson, curateSearchJson,
+	formatIssueChildren, plainIssueChildren, curateChildrenJson,
 } from '../formatters/jira.js';
 import { spinner } from '../utils/output.js';
 import { handleError } from '../utils/errors.js';
@@ -71,6 +73,24 @@ jira.command('search <jql>')
 		} catch (err) {
 			if (s) s.error({ text: 'Search failed' });
 			handleError(err, `jira search "${jql}"`);
+		}
+	});
+
+jira.command('children <key>')
+	.alias('subs')
+	.description('List epic children or issue subtasks')
+	.action(async function (key) {
+		const mode = getOutputMode(this);
+		const s = mode === 'rich' ? spinner(`Fetching children of ${key}...`).start() : null;
+		try {
+			const result = await getIssueChildren(key);
+			if (s) s.success({ text: `${result.total} ${result.source === 'epic' ? 'issue(s) in epic' : 'subtask(s)'}` });
+			if (mode === 'json') outputJson(curateChildrenJson(result));
+			else if (mode === 'plain') plainIssueChildren(result);
+			else formatIssueChildren(result);
+		} catch (err) {
+			if (s) s.error({ text: `Failed to fetch children of ${key}` });
+			handleError(err, `jira children ${key}`);
 		}
 	});
 

@@ -23,6 +23,7 @@ dev pr activity 42           # approvals, updates, comments
 dev jira view PROJ-123       # ticket details
 dev jira comments PROJ-123   # ticket comments
 dev jira search "sprint = 5" # JQL search
+dev jira children PROJ-123   # epic children or subtasks (auto-detect)
 dev jira mine                # your open tickets
 
 dev confluence spaces        # list spaces
