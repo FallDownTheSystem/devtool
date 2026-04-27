@@ -4,11 +4,14 @@ import {
 	getIssueComments,
 	searchIssues,
 	getMyIssues,
+	listQueues,
+	searchByQueue,
 } from '../clients/serviceDesk.js';
 import {
 	formatIssueView, formatIssueComments, formatIssueSearch,
 	plainIssueView, plainIssueComments, plainIssueSearch,
 	curateIssueJson, curateCommentsJson, curateSearchJson,
+	formatQueueList, plainQueueList, curateQueuesJson,
 } from '../formatters/serviceDesk.js';
 import { spinner } from '../utils/output.js';
 import { handleError } from '../utils/errors.js';
@@ -71,6 +74,43 @@ sd.command('search <jql>')
 		} catch (err) {
 			if (s) s.error({ text: 'Search failed' });
 			handleError(err, `sd search "${jql}"`);
+		}
+	});
+
+sd.command('queues')
+	.description('List Service Desk queues for the default project')
+	.action(async function () {
+		const mode = getOutputMode(this);
+		const s = mode === 'rich' ? spinner('Fetching queues...').start() : null;
+		try {
+			const queues = await listQueues();
+			if (s) s.success({ text: `${queues.length} queue(s)` });
+			if (mode === 'json') outputJson(curateQueuesJson(queues));
+			else if (mode === 'plain') plainQueueList(queues);
+			else formatQueueList(queues);
+		} catch (err) {
+			if (s) s.error({ text: 'Failed to fetch queues' });
+			handleError(err, 'sd queues');
+		}
+	});
+
+sd.command('queue <nameOrId>')
+	.description('Show issues in a Service Desk queue (by name or id)')
+	.option('-n, --per-page <number>', 'Results per page', '20')
+	.option('--next <token>', 'Continuation token from a previous page')
+	.action(async function (nameOrId, opts) {
+		const mode = getOutputMode(this);
+		const perPage = parseInt(opts.perPage, 10);
+		const s = mode === 'rich' ? spinner(`Fetching queue "${nameOrId}"...`).start() : null;
+		try {
+			const result = await searchByQueue(nameOrId, perPage, opts.next || '');
+			if (s) s.success({ text: `${result.issues.length} issue(s) in "${result.queue.name}"` });
+			if (mode === 'json') outputJson(curateSearchJson(result));
+			else if (mode === 'plain') plainIssueSearch(result);
+			else formatIssueSearch(result);
+		} catch (err) {
+			if (s) s.error({ text: `Failed to fetch queue "${nameOrId}"` });
+			handleError(err, `sd queue ${nameOrId}`);
 		}
 	});
 

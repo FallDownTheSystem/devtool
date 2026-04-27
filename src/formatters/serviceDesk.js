@@ -97,6 +97,7 @@ export function curateSearchJson(result) {
 	return {
 		nextPageToken: result.nextPageToken,
 		isLast: result.isLast,
+		queue: result.queue ? { id: result.queue.id, name: result.queue.name, jql: result.queue.jql } : undefined,
 		issues: result.issues.map((issue) => ({
 			key: issue.key,
 			summary: issue.fields.summary,
@@ -106,6 +107,31 @@ export function curateSearchJson(result) {
 			updated: issue.fields.updated,
 		})),
 	};
+}
+
+export function curateQueuesJson(queues) {
+	return queues.map((q) => ({ id: q.id, name: q.name, jql: q.jql }));
+}
+
+export function plainQueueList(queues) {
+	if (queues.length === 0) { console.log('No queues.'); return; }
+	for (const q of queues) {
+		console.log(`${q.id}\t${q.name}\t${q.jql}`);
+	}
+}
+
+export function formatQueueList(queues) {
+	if (queues.length === 0) {
+		console.log(pc.dim('  No queues.'));
+		return;
+	}
+	const rows = queues.map((q) => [
+		pc.dim(String(q.id)),
+		pc.bold(q.name),
+		(q.jql || '').length > 80 ? q.jql.slice(0, 77) + '...' : q.jql || '',
+	]);
+	console.log(table(['ID', 'Name', 'JQL'], rows));
+	console.log('');
 }
 
 // --- Plain formatters ---
@@ -138,6 +164,10 @@ export function plainIssueComments(comments) {
 }
 
 export function plainIssueSearch(result) {
+	if (result.queue) {
+		console.log(`Queue: ${result.queue.name} (${result.queue.id})`);
+		console.log(`JQL: ${result.queue.jql}`);
+	}
 	if (result.issues.length === 0) { console.log('No issues found.'); return; }
 	for (const issue of result.issues) {
 		const f = issue.fields;
@@ -205,6 +235,12 @@ export function formatIssueComments(comments) {
 
 export function formatIssueSearch(result) {
 	const { issues } = result;
+
+	if (result.queue) {
+		heading(`Queue: ${result.queue.name}`);
+		console.log(pc.dim(`  ${result.queue.jql}`));
+		divider();
+	}
 
 	if (issues.length === 0) {
 		console.log(pc.dim('  No issues found.'));

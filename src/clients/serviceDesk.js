@@ -10,7 +10,7 @@ function authHeader() {
 	return 'Basic ' + Buffer.from(`${email}:${token}`).toString('base64');
 }
 
-async function request(path, params = {}) {
+async function request(path, params = {}, extraHeaders = {}) {
 	const url = new URL(path.startsWith('http') ? path : `${baseUrl()}${path}`);
 	for (const [k, v] of Object.entries(params)) {
 		if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
@@ -20,6 +20,7 @@ async function request(path, params = {}) {
 		headers: {
 			'Authorization': authHeader(),
 			'Accept': 'application/json',
+			...extraHeaders,
 		},
 	});
 
@@ -69,4 +70,50 @@ export async function getMyIssues() {
 		? `project = ${project} AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC`
 		: `assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC`;
 	return searchIssues(jql);
+}
+
+let _serviceDeskIdCache = null;
+
+async function getServiceDeskId(projectKey) {
+	if (_serviceDeskIdCache && _serviceDeskIdCache.projectKey === projectKey) {
+		return _serviceDeskIdCache.id;
+	}
+	const data = await request('/rest/servicedeskapi/servicedesk', { start: 0, limit: 100 }, { 'X-ExperimentalApi': 'opt-in' });
+	const match = (data.values || []).find((sd) => sd.projectKey === projectKey);
+	if (!match) {
+		throw new Error(`No Service Desk found for project ${projectKey}`);
+	}
+	_serviceDeskIdCache = { projectKey, id: match.id };
+	return match.id;
+}
+
+export async function listQueues() {
+	const projectKey = get('serviceDesk.defaultProject');
+	if (!projectKey) throw new Error('serviceDesk.defaultProject is not configured');
+	const sdId = await getServiceDeskId(projectKey);
+	const data = await request(`/rest/servicedeskapi/servicedesk/${sdId}/queue`, { start: 0, limit: 100 }, { 'X-ExperimentalApi': 'opt-in' });
+	return (data.values || []).map((q) => ({ id: q.id, name: q.name, jql: q.jql }));
+}
+
+export async function findQueue(nameOrId) {
+	const queues = await listQueues();
+	const idMatch = queues.find((q) => String(q.id) === String(nameOrId));
+	if (idMatch) return idMatch;
+	const lower = nameOrId.toLowerCase();
+	const exact = queues.find((q) => q.name.toLowerCase() === lower);
+	if (exact) return exact;
+	const partial = queues.filter((q) => q.name.toLowerCase().includes(lower));
+	if (partial.length === 1) return partial[0];
+	if (partial.length > 1) {
+		const err = new Error(`Ambiguous queue "${nameOrId}" — matches: ${partial.map((q) => q.name).join(', ')}`);
+		err.candidates = partial;
+		throw err;
+	}
+	throw new Error(`No queue found matching "${nameOrId}"`);
+}
+
+export async function searchByQueue(nameOrId, maxResults = 50, nextPageToken = '') {
+	const queue = await findQueue(nameOrId);
+	const result = await searchIssues(queue.jql, maxResults, nextPageToken);
+	return { ...result, queue };
 }
