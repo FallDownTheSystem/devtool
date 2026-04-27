@@ -59,6 +59,10 @@ function requestType(fields) {
 	return null;
 }
 
+function migrationServerKey(fields) {
+	return fields.customfield_10165 || null;
+}
+
 // --- JSON curators ---
 
 export function curateIssueJson(issue) {
@@ -70,6 +74,7 @@ export function curateIssueJson(issue) {
 		priority: f.priority?.name || null,
 		type: f.issuetype?.name || null,
 		requestType: requestType(f),
+		migrationServerKey: migrationServerKey(f),
 		assignee: f.assignee?.displayName || null,
 		reporter: f.reporter?.displayName || null,
 		labels: f.labels || [],
@@ -113,6 +118,8 @@ export function plainIssueView(issue) {
 	console.log(`Type: ${f.issuetype?.name || 'Unknown'}`);
 	const rt = requestType(f);
 	if (rt) console.log(`Request Type: ${rt}`);
+	const mk = migrationServerKey(f);
+	if (mk) console.log(`Migration Server Key: ${mk}`);
 	console.log(`Assignee: ${f.assignee?.displayName || 'Unassigned'}`);
 	console.log(`Reporter: ${f.reporter?.displayName || 'Unknown'}`);
 	if (f.labels?.length > 0) console.log(`Labels: ${f.labels.join(', ')}`);
@@ -153,6 +160,8 @@ export function formatIssueView(issue) {
 	field('Type', f.issuetype?.name);
 	const rt = requestType(f);
 	if (rt) field('Request Type', rt);
+	const mk = migrationServerKey(f);
+	if (mk) field('Migration Server Key', mk);
 	field('Assignee', f.assignee?.displayName || pc.dim('Unassigned'));
 	field('Reporter', f.reporter?.displayName);
 	field('Labels', f.labels?.length > 0 ? f.labels.join(', ') : null);
