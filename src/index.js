@@ -6,13 +6,14 @@ import configCmd from './commands/config.js';
 import prCmd from './commands/pr.js';
 import jiraCmd from './commands/jira.js';
 import confluenceCmd from './commands/confluence.js';
+import sdCmd from './commands/sd.js';
 
 const program = new Command();
 
 program
 	.name('dev')
-	.description('CLI for Bitbucket PRs, Jira tickets, and Confluence pages')
-	.version('0.2.0')
+	.description('CLI for Bitbucket PRs, Jira tickets, Confluence pages, and Service Desk tickets')
+	.version('0.3.0')
 	.option('--json', 'Output raw JSON')
 	.option('--plain', 'Output compact plain text (no tables, no colors)');
 
@@ -20,6 +21,7 @@ program.addCommand(configCmd);
 program.addCommand(prCmd);
 program.addCommand(jiraCmd);
 program.addCommand(confluenceCmd);
+program.addCommand(sdCmd);
 
 program.hook('preAction', async (thisCommand, actionCommand) => {
 	const cmdChain = [];
