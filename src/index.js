@@ -13,7 +13,7 @@ const program = new Command();
 program
 	.name('dev')
 	.description('CLI for Bitbucket PRs, Jira tickets, Confluence pages, and Service Desk tickets')
-	.version('0.3.0')
+	.version('0.3.1')
 	.option('--json', 'Output raw JSON')
 	.option('--plain', 'Output compact plain text (no tables, no colors)');
 
