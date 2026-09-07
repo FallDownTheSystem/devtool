@@ -2,31 +2,44 @@ import Conf from 'conf';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 
-const schema = {
+export const schema = {
 	bitbucket: {
 		type: 'object',
+		title: 'Bitbucket',
 		properties: {
-			workspace: { type: 'string' },
-			defaultRepo: { type: 'string' },
-			email: { type: 'string' },
-			token: { type: 'string' },
+			workspace: { type: 'string', title: 'Workspace' },
+			defaultRepo: { type: 'string', title: 'Default repo' },
+			email: { type: 'string', title: 'Email' },
+			token: { type: 'string', title: 'Token', writeOnly: true },
 		},
 	},
 	jira: {
 		type: 'object',
+		title: 'Jira',
 		properties: {
-			baseUrl: { type: 'string' },
-			token: { type: 'string' },
-			defaultProject: { type: 'string' },
+			baseUrl: { type: 'string', title: 'Base URL' },
+			token: { type: 'string', title: 'Token', writeOnly: true },
+			defaultProject: { type: 'string', title: 'Default project' },
 		},
 	},
 	confluence: {
 		type: 'object',
+		title: 'Confluence',
 		properties: {
-			baseUrl: { type: 'string' },
-			email: { type: 'string' },
-			token: { type: 'string' },
-			defaultSpace: { type: 'string' },
+			baseUrl: { type: 'string', title: 'Base URL' },
+			email: { type: 'string', title: 'Email' },
+			token: { type: 'string', title: 'Token', writeOnly: true },
+			defaultSpace: { type: 'string', title: 'Default space' },
+		},
+	},
+	serviceDesk: {
+		type: 'object',
+		title: 'Service Desk',
+		properties: {
+			baseUrl: { type: 'string', title: 'Base URL' },
+			email: { type: 'string', title: 'Email' },
+			token: { type: 'string', title: 'Token', writeOnly: true },
+			defaultProject: { type: 'string', title: 'Default project' },
 		},
 	},
 };
@@ -38,6 +51,7 @@ const config = new Conf({
 		bitbucket: { workspace: '', defaultRepo: '', email: '', token: '' },
 		jira: { baseUrl: '', token: '', defaultProject: '' },
 		confluence: { baseUrl: '', email: '', token: '', defaultSpace: '' },
+		serviceDesk: { baseUrl: '', email: '', token: '', defaultProject: '' },
 	},
 });
 
@@ -146,9 +160,52 @@ export async function runSetup() {
 		},
 	});
 
+	const reuseConfluenceCreds = confluence.email && confluence.token
+		? await p.confirm({
+			message: 'Reuse Confluence email/token for Jira Service Desk Cloud?',
+			initialValue: true,
+		})
+		: false;
+
+	if (p.isCancel(reuseConfluenceCreds)) {
+		p.cancel('Setup cancelled.');
+		process.exit(0);
+	}
+
+	const serviceDesk = await p.group({
+		baseUrl: () => p.text({
+			message: 'Jira Service Desk Cloud base URL (use canonical *.atlassian.net, not a vanity domain)',
+			placeholder: 'https://company.atlassian.net',
+			initialValue: config.get('serviceDesk.baseUrl') || '',
+		}),
+		email: () => reuseConfluenceCreds
+			? Promise.resolve(confluence.email)
+			: p.text({
+				message: 'Service Desk account email',
+				placeholder: 'you@company.com',
+				initialValue: config.get('serviceDesk.email') || '',
+			}),
+		token: () => reuseConfluenceCreds
+			? Promise.resolve(confluence.token)
+			: p.password({
+				message: 'Service Desk API token',
+			}),
+		defaultProject: () => p.text({
+			message: 'Service Desk default project key',
+			placeholder: 'TUKI',
+			initialValue: config.get('serviceDesk.defaultProject') || '',
+		}),
+	}, {
+		onCancel: () => {
+			p.cancel('Setup cancelled.');
+			process.exit(0);
+		},
+	});
+
 	config.set('bitbucket', bb);
 	config.set('jira', jira);
 	config.set('confluence', confluence);
+	config.set('serviceDesk', serviceDesk);
 
 	p.outro(pc.green('Configuration saved!'));
 }

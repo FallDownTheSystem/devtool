@@ -1,17 +1,35 @@
 {
-	"name": "devtool",
-	"version": "0.1.0",
-	"description": "CLI for Bitbucket PRs and Jira tickets",
+	"name": "@falldownthesystem/devtool",
+	"version": "0.4.1",
+	"description": "CLI for Bitbucket PRs, Jira tickets, Confluence pages, and Service Desk tickets",
 	"type": "module",
 	"bin": {
 		"dev": "src/index.js"
 	},
+	"files": [
+		"src/"
+	],
 	"scripts": {
-		"start": "node src/index.js"
+		"start": "node src/index.js",
+		"test": "node --test test/config.test.js test/confluence.test.js test/service-desk.test.js"
 	},
-	"keywords": [],
-	"author": "",
+	"keywords": [
+		"cli",
+		"bitbucket",
+		"jira",
+		"confluence",
+		"pull-request",
+		"devtools"
+	],
+	"author": "FallDownTheSystem",
 	"license": "ISC",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/FallDownTheSystem/devtool.git"
+	},
+	"engines": {
+		"node": ">=18"
+	},
 	"dependencies": {
 		"@clack/prompts": "^1.0.0",
 		"cli-table3": "^0.6.5",

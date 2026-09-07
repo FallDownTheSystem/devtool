@@ -5,8 +5,7 @@ A terminal-first CLI for working with Bitbucket PRs, Jira tickets, and Confluenc
 ## Install
 
 ```bash
-npm install
-npm link
+npm install -g @falldownthesystem/devtool
 ```
 
 This gives you the `dev` command globally. On first run, it'll walk you through connecting your Bitbucket, Jira, and Confluence accounts.
@@ -23,6 +22,7 @@ dev pr activity 42           # approvals, updates, comments
 dev jira view PROJ-123       # ticket details
 dev jira comments PROJ-123   # ticket comments
 dev jira search "sprint = 5" # JQL search
+dev jira children PROJ-123   # epic children or subtasks (auto-detect)
 dev jira mine                # your open tickets
 
 dev confluence spaces        # list spaces

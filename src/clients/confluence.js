@@ -1,7 +1,7 @@
 import { get } from '../config/store.js';
 
-function baseUrl() {
-	return `${get('confluence.baseUrl')}/wiki`;
+function apiUrl(path) {
+	return new URL(`/wiki${path}`, get('confluence.baseUrl'));
 }
 
 function authHeader() {
@@ -10,8 +10,10 @@ function authHeader() {
 	return 'Basic ' + Buffer.from(`${email}:${token}`).toString('base64');
 }
 
-async function request(path, params = {}) {
-	const url = new URL(path.startsWith('http') ? path : `${baseUrl()}${path}`);
+async function request(url, params = {}) {
+	if (url.origin !== new URL(get('confluence.baseUrl')).origin) {
+		throw new Error('Confluence pagination points to a different site. Check confluence.baseUrl.');
+	}
 	for (const [k, v] of Object.entries(params)) {
 		if (v !== undefined && v !== null) url.searchParams.set(k, v);
 	}
@@ -35,11 +37,13 @@ async function request(path, params = {}) {
 
 async function paginateV2(path, params = {}) {
 	const results = [];
-	let data = await request(path, params);
+	let url = apiUrl(path);
+	let data = await request(url, params);
 	results.push(...(data.results || []));
 
 	while (data._links?.next) {
-		data = await request(data._links.next);
+		url = new URL(data._links.next, url);
+		data = await request(url);
 		results.push(...(data.results || []));
 	}
 
@@ -51,7 +55,7 @@ export async function listSpaces() {
 }
 
 export async function getPage(id) {
-	return request(`/api/v2/pages/${id}`, { 'body-format': 'storage' });
+	return request(apiUrl(`/api/v2/pages/${id}`), { 'body-format': 'storage' });
 }
 
 export async function listSpacePages(spaceId) {
@@ -59,5 +63,5 @@ export async function listSpacePages(spaceId) {
 }
 
 export async function searchPages(cql) {
-	return request('/rest/api/search', { cql });
+	return request(apiUrl('/rest/api/search'), { cql });
 }
