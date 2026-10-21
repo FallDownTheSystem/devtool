@@ -136,17 +136,17 @@ export async function runSetup() {
 
 	const confluence = await p.group({
 		baseUrl: () => p.text({
-			message: 'Confluence Cloud base URL',
+			message: 'Confluence base URL (Cloud or Server/Data Center)',
 			placeholder: 'https://company.atlassian.net',
 			initialValue: config.get('confluence.baseUrl') || '',
 		}),
 		email: () => p.text({
-			message: 'Confluence account email',
+			message: 'Confluence account email (Server/Data Center: username, or empty for a personal access token)',
 			placeholder: 'you@company.com',
 			initialValue: config.get('confluence.email') || '',
 		}),
 		token: () => p.password({
-			message: 'Confluence API token',
+			message: 'Confluence API token (Server/Data Center: personal access token or password)',
 		}),
 		defaultSpace: () => p.text({
 			message: 'Confluence default space key',

@@ -53,7 +53,7 @@ Stored via the `conf` package in your OS config directory. You'll need:
 
 - **Bitbucket**: workspace, default repo, email, app password
 - **Jira**: base URL, API token, default project
-- **Confluence**: uses the same Jira base URL and token
+- **Confluence**: base URL, email, API token, default space. Cloud and Server/Data Center are detected from the base URL. For Server/Data Center, include any context path (`https://company.com/confluence`) and leave the email empty to use a personal access token, or set it to your username for Basic auth.
 
 ## License
 

@@ -57,30 +57,25 @@ confluence.command('pages')
 	.alias('ls')
 	.description('List pages in a space')
 	.option('-s, --space <key>', 'Space key (overrides default)')
-	.option('--space-id <id>', 'Space ID (skip key lookup)')
+	.option('--space-id <id>', 'Space ID (instead of a key)')
 	.action(async function (opts) {
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner('Fetching pages...').start() : null;
 		try {
-			let spaceId = opts.spaceId;
-			if (!spaceId) {
-				const spaceKey = opts.space || get('confluence.defaultSpace');
-				if (!spaceKey) {
-					if (s) s.error({ text: 'No space specified' });
-					console.error('Specify --space <key>, --space-id <id>, or set confluence.defaultSpace');
-					process.exitCode = 1;
-					return;
-				}
-				const spaces = await listSpaces();
-				const match = spaces.find((sp) => sp.key === spaceKey);
-				if (!match) {
-					if (s) s.error({ text: `Space "${spaceKey}" not found` });
-					process.exitCode = 1;
-					return;
-				}
-				spaceId = match.id;
+			const spaceId = opts.spaceId;
+			const spaceKey = spaceId ? undefined : opts.space || get('confluence.defaultSpace');
+			if (!spaceId && !spaceKey) {
+				if (s) s.error({ text: 'No space specified' });
+				console.error('Specify --space <key>, --space-id <id>, or set confluence.defaultSpace');
+				process.exitCode = 1;
+				return;
 			}
-			const pages = await listSpacePages(spaceId);
+			const pages = await listSpacePages({ spaceId, spaceKey });
+			if (!pages) {
+				if (s) s.error({ text: `Space "${spaceId || spaceKey}" not found` });
+				process.exitCode = 1;
+				return;
+			}
 			if (s) s.success({ text: `${pages.length} page(s) found` });
 			if (mode === 'json') outputJson(curatePagesJson(pages));
 			else if (mode === 'plain') plainPages(pages);
