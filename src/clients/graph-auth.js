@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { configPath, validateGraphId } from '../config/store.js';
+import { createProtectedCache } from './graph-cache.js';
 
 export const GRAPH_SCOPES = ['User.Read', 'Chat.Read', 'Mail.Read', 'Sites.Read.All'];
 export const SHARED_MAIL_SCOPE = 'Mail.Read.Shared';
@@ -28,27 +29,15 @@ export function graphIdentity(connection = {}) {
 async function createApplication(connection) {
 	const { tenantId, clientId } = graphIdentity(connection);
 	const { PublicClientApplication } = await import('@azure/msal-node');
-	const { PersistenceCreator, PersistenceCachePlugin, DataProtectionScope } = await import('@azure/msal-node-extensions');
 	const identity = createHash('sha256').update(`${tenantId}:${clientId}`).digest('hex');
 	const directory = join(dirname(configPath()), 'graph-auth');
 	await mkdir(directory, { recursive: true, mode: 0o700 });
-	let persistence;
-	try {
-		persistence = await PersistenceCreator.createPersistence({
-			cachePath: join(directory, `${identity}.bin`),
-			dataProtectionScope: DataProtectionScope.CurrentUser,
-			serviceName: 'devtool-graph',
-			accountName: identity,
-			usePlaintextFileOnLinux: false,
-		});
-	} catch (err) {
-		const code = err.errorCode || err.code;
-		const detail = typeof code === 'string' && /^[a-z0-9_.-]{1,80}$/i.test(code) ? ` (${code})` : '';
-		throw new Error(`Cannot open the OS-protected Graph token cache${detail}. Check your Windows account, macOS Keychain, or Linux Secret Service. Plaintext storage is disabled.`);
-	}
+	// Caches written by the earlier msal-node-extensions storage cannot be read by this one.
+	await rm(join(directory, `${identity}.bin`), { force: true });
+	await rm(join(directory, `${identity}.bin.lockfile`), { force: true });
 	return new PublicClientApplication({
 		auth: { clientId, authority: `https://login.microsoftonline.com/${tenantId}` },
-		cache: { cachePlugin: new PersistenceCachePlugin(persistence) },
+		cache: { cachePlugin: createProtectedCache({ path: join(directory, `${identity}.cache`), identity }) },
 	});
 }
 

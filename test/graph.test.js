@@ -13,6 +13,7 @@ process.env.XDG_CONFIG_HOME = join(directory, 'config');
 const { createGraphClient, graphUrl, graphId, graphLimit, siteAddress, calendarRange } = await import('../src/clients/graph.js');
 const { createGraphAuth, GRAPH_SCOPES, SHARED_MAIL_SCOPE, CALENDAR_SCOPE, AVAILABILITY_SCOPE, graphIdentity } = await import('../src/clients/graph-auth.js');
 const { createGraphCommand, graphErrorMessage } = await import('../src/commands/graph.js');
+const { createProtectedCache, keyringKeyStore } = await import('../src/clients/graph-cache.js');
 const { curateMailJson, curateChatMessageJson, curateFileJson, curateNextEventJson, curateAvailabilityJson, formatGraph } = await import('../src/formatters/graph.js');
 const { setField, getConnection, validateGraphId, validateGraphSite } = await import('../src/config/store.js');
 after(() => rm(directory, { recursive: true, force: true }));
@@ -296,21 +297,102 @@ function authFixture(accounts = []) {
 
 const user = { username: 'user@example.test', name: 'Example', homeAccountId: 'home', tenantId: 'tenant' };
 
-test('Windows persistence encrypts the cache and survives a new instance', { skip: process.platform !== 'win32' }, async () => {
-	const { PersistenceCreator, DataProtectionScope } = await import('@azure/msal-node-extensions');
-	const options = {
-		cachePath: join(directory, 'protected-cache.bin'),
-		dataProtectionScope: DataProtectionScope.CurrentUser,
-		serviceName: 'devtool-graph-test',
-		accountName: 'temporary-test',
-		usePlaintextFileOnLinux: false,
-	};
+function memoryKeyStore() {
+	const state = { key: null, sets: 0 };
+	return { state, keyStore: async () => ({ get: async () => state.key, set: async (key) => { state.key = key; state.sets++; } }) };
+}
+
+function cacheContext(cacheHasChanged, data) {
+	const context = { loaded: null, cacheHasChanged, tokenCache: { deserialize: (value) => { context.loaded = value; }, serialize: () => data } };
+	return context;
+}
+
+test('token cache is encrypted at rest and readable by a new instance', async () => {
+	const path = join(directory, 'roundtrip.cache');
+	const { state, keyStore } = memoryKeyStore();
 	const marker = 'not-a-real-token-cache-test';
-	const cache = await PersistenceCreator.createPersistence(options);
-	await cache.save(marker);
-	assert.equal((await readFile(options.cachePath)).includes(Buffer.from(marker)), false);
-	const restored = await PersistenceCreator.createPersistence(options);
-	assert.equal(await restored.load(), marker);
+	const cache = createProtectedCache({ path, identity: 'identity', keyStore });
+	const write = cacheContext(true, marker);
+	await cache.beforeCacheAccess(write);
+	assert.equal(write.loaded, null);
+	await cache.afterCacheAccess(write);
+	assert.equal(state.key.length, 32);
+	assert.equal((await readFile(path)).includes(Buffer.from(marker)), false);
+	await assert.rejects(stat(`${path}.lock`), { code: 'ENOENT' });
+
+	const read = cacheContext(false);
+	await createProtectedCache({ path, identity: 'identity', keyStore }).beforeCacheAccess(read);
+	assert.equal(read.loaded, marker);
+	await assert.rejects(stat(`${path}.lock`), { code: 'ENOENT' });
+	assert.equal(state.sets, 1);
+});
+
+test('a tampered file, another identity, or a lost key reads as an empty cache', async () => {
+	const path = join(directory, 'tamper.cache');
+	const { state, keyStore } = memoryKeyStore();
+	const write = cacheContext(true, 'secret-cache');
+	const cache = createProtectedCache({ path, identity: 'identity', keyStore });
+	await cache.beforeCacheAccess(write);
+	await cache.afterCacheAccess(write);
+	const original = await readFile(path);
+
+	const readAs = async (identity) => {
+		const context = cacheContext(false);
+		await createProtectedCache({ path, identity, keyStore }).beforeCacheAccess(context);
+		return context.loaded;
+	};
+	assert.equal(await readAs('other-identity'), null);
+	const tampered = Buffer.from(original);
+	tampered[tampered.length - 1] ^= 1;
+	await writeFile(path, tampered);
+	assert.equal(await readAs('identity'), null);
+	await writeFile(path, original);
+	assert.equal(await readAs('identity'), 'secret-cache');
+	state.key = null;
+	assert.equal(await readAs('identity'), null);
+});
+
+test('a changing cache access holds the lock until it is written', async () => {
+	const path = join(directory, 'lock.cache');
+	const { keyStore } = memoryKeyStore();
+	const first = cacheContext(true, 'first');
+	const second = cacheContext(true, 'second');
+	const a = createProtectedCache({ path, identity: 'identity', keyStore, lockOptions: { retry: 5 } });
+	const b = createProtectedCache({ path, identity: 'identity', keyStore, lockOptions: { retry: 5 } });
+	await a.beforeCacheAccess(first);
+	let entered = false;
+	const waiting = b.beforeCacheAccess(second).then(() => { entered = true; });
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	assert.equal(entered, false);
+	await a.afterCacheAccess(first);
+	await waiting;
+	assert.equal(second.loaded, 'first');
+	await b.afterCacheAccess(second);
+	await assert.rejects(stat(`${path}.lock`), { code: 'ENOENT' });
+});
+
+test('a stale lock from a killed process is removed', async () => {
+	const path = join(directory, 'stale.cache');
+	await writeFile(`${path}.lock`, '');
+	const { keyStore } = memoryKeyStore();
+	const cache = createProtectedCache({ path, identity: 'identity', keyStore, lockOptions: { stale: 0, retry: 5 } });
+	await cache.beforeCacheAccess(cacheContext(false));
+	await assert.rejects(stat(`${path}.lock`), { code: 'ENOENT' });
+	const busy = createProtectedCache({ path, identity: 'identity', keyStore, lockOptions: { timeout: 20, retry: 5 } });
+	await writeFile(`${path}.lock`, '');
+	await assert.rejects(busy.beforeCacheAccess(cacheContext(false)), /another devtool process/);
+});
+
+test('the OS credential store keeps the cache key across instances', { skip: process.platform !== 'win32' }, async () => {
+	const { AsyncEntry } = await import('@napi-rs/keyring');
+	const identity = `devtool-test-${process.pid}-${Date.now()}`;
+	try {
+		const key = Buffer.alloc(32, 7);
+		await (await keyringKeyStore(identity)).set(key);
+		assert.deepEqual(await (await keyringKeyStore(identity)).get(), key);
+	} finally {
+		await new AsyncEntry('devtool-graph-key', identity).deleteCredential();
+	}
 });
 
 test('silent auth never starts a browser or chooses an arbitrary account', async () => {

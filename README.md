@@ -103,7 +103,7 @@ dev config set graph.defaultSite https://company.sharepoint.com/sites/MySite
 
 `graph.<field>` addresses the default Graph connection; use `<name>.<field>` for a named one. Setup and login require an interactive terminal without `--json` or `--plain`. Data commands never prompt or open a browser. If sign-in expires or needs fresh consent, run `dev graph login` again.
 
-Tokens use an OS-protected cache outside the repository, partitioned by tenant and client ID. Windows uses current-user DPAPI, macOS uses Keychain, and Linux requires Secret Service/libsecret. There is no plaintext fallback. Native dependency installation may require platform-specific build tools. `dev graph logout` removes the local cached account for the current tenant/client pair; it does not revoke grants or sign out browser sessions. Changing IDs selects another cache; log out before changing IDs if you want to remove the old account.
+Tokens are kept in a cache file outside the repository, partitioned by tenant and client ID and encrypted with AES-256-GCM. The encryption key is stored in the OS credential store: Windows Credential Manager, macOS Keychain, or Linux Secret Service (required on Linux). There is no plaintext fallback. The credential store binding ships prebuilt for each platform, so installation needs no build tools or install scripts. `dev graph logout` removes the local cached account for the current tenant/client pair; it does not revoke grants or sign out browser sessions. Changing IDs selects another cache; log out before changing IDs if you want to remove the old account.
 
 For one sign-in covering every supported service, add the optional delegated permissions `Mail.Read.Shared`, `Calendars.Read.Shared`, and `Calendars.ReadBasic`, then run:
 

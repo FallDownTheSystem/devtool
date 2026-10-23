@@ -66,4 +66,4 @@ Clients do not read config; commands pass the resolved connection in. Per-site c
 - **Jira** (`clients/jira.js`): Uses `jira.js` SDK (Version2Client) with Bearer token auth (overrides SDK's built-in Basic auth via request interceptor); one client per base URL and token
 - **Confluence** (`clients/confluence.js`): Cloud or Server/Data Center, detected per origin
 - **Service Desk** (`clients/serviceDesk.js`): Jira Cloud REST v3 and the Service Desk API, Basic auth
-- **Microsoft Graph** (`clients/graph.js`, `clients/graph-auth.js`): delegated MSAL sign-in with an OS-protected token cache partitioned by tenant and client ID; `commands/graph.js` builds the auth and client per invocation from the resolved connection
+- **Microsoft Graph** (`clients/graph.js`, `clients/graph-auth.js`, `clients/graph-cache.js`): delegated MSAL sign-in; the token cache is an AES-256-GCM file per tenant and client ID whose key lives in the OS credential store (`@napi-rs/keyring`), with a lock file spanning MSAL's read-modify-write; `commands/graph.js` builds the auth and client per invocation from the resolved connection
