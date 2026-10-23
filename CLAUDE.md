@@ -51,7 +51,7 @@ Commands follow this pattern: check mode → conditionally show spinner → reso
 
 ### Config
 
-Stored via `conf` package (projectName: `devtool`) as a `connections` array. Each entry has a `type` (`bitbucket`, `jira`, `confluence`, `serviceDesk`), an optional `name`, an optional `default` flag, and the string fields that `types` in `config/store.js` defines for that type. No configuration is required up front; a command fails with a hint only when its type has no connection.
+Stored via `conf` package (projectName: `devtool`) as a `connections` array. Each entry has a `type` (`bitbucket`, `jira`, `confluence`, `serviceDesk`, `graph`), an optional `name`, an optional `default` flag, and the string fields that `types` in `config/store.js` defines for that type. A field may define `validate` (checked by setup prompts and `config set`) and `normalize` (applied on every save); a type may define a `note` shown before its setup prompts. No configuration is required up front; a command fails with a hint only when its type has no connection.
 
 - A connection's label is its name, or its type when unnamed. Labels are unique, so only one unnamed connection per type is allowed and names cannot equal a type.
 - A reference (`--connection`, `config set <ref>.<field>`) matches a label first; a bare type falls back to that type's default connection.
@@ -66,3 +66,4 @@ Clients do not read config; commands pass the resolved connection in. Per-site c
 - **Jira** (`clients/jira.js`): Uses `jira.js` SDK (Version2Client) with Bearer token auth (overrides SDK's built-in Basic auth via request interceptor); one client per base URL and token
 - **Confluence** (`clients/confluence.js`): Cloud or Server/Data Center, detected per origin
 - **Service Desk** (`clients/serviceDesk.js`): Jira Cloud REST v3 and the Service Desk API, Basic auth
+- **Microsoft Graph** (`clients/graph.js`, `clients/graph-auth.js`): delegated MSAL sign-in with an OS-protected token cache partitioned by tenant and client ID; `commands/graph.js` builds the auth and client per invocation from the resolved connection

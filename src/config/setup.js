@@ -1,7 +1,7 @@
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import {
-	types, label, listConnections, isDefault, saveConnection, validateName, resolveIndex,
+	types, label, listConnections, isDefault, saveConnection, validateName, resolveIndex, fieldProblem,
 } from './store.js';
 
 function answer(value) {
@@ -45,6 +45,7 @@ async function promptConnection(type, existing = {}, index = -1) {
 	const connections = listConnections();
 	const connection = { type };
 	if (existing.default) connection.default = true;
+	if (types[type].note) p.note(types[type].note, types[type].title);
 
 	const unnamedTaken = connections.some((c, i) => i !== index && c.type === type && !c.name);
 	connection.name = answer(await p.text({
@@ -63,7 +64,11 @@ async function promptConnection(type, existing = {}, index = -1) {
 		}
 		const keep = field.secret && existing[key];
 		const message = keep ? `${field.message} (leave empty to keep the current one)` : field.message;
-		const validate = (v) => field.required && !keep && !(v ?? '').trim() ? 'Required' : undefined;
+		const validate = (v) => {
+			const value = (v ?? '').trim();
+			if (!value) return field.required && !keep ? 'Required' : undefined;
+			return fieldProblem(type, key, value);
+		};
 		const value = field.secret
 			? answer(await p.password({ message, validate }))
 			: answer(await p.text({ message, placeholder: field.placeholder, initialValue: existing[key] || '', validate }));

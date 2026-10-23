@@ -1,5 +1,24 @@
 import Conf from 'conf';
 
+export function validateGraphId(value) {
+	return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value?.trim() || '')
+		? undefined
+		: 'Enter the ID as a UUID from the Entra application Overview page.';
+}
+
+export function validateGraphSite(value) {
+	if (!value?.trim()) return undefined;
+	try {
+		const url = new URL(value.trim());
+		if (url.protocol === 'https:' && url.hostname.endsWith('.sharepoint.com') && !url.username && !url.password && !url.port && !url.search && !url.hash) {
+			decodeURIComponent(url.pathname);
+			return undefined;
+		}
+	} catch {}
+	return 'Enter a SharePoint Online site URL without a query or fragment.';
+}
+
+// A field's `validate` returns a problem message for a non-empty value; `normalize` runs on every save.
 export const types = {
 	bitbucket: {
 		title: 'Bitbucket',
@@ -36,7 +55,21 @@ export const types = {
 			defaultProject: { title: 'Default project', message: 'Service Desk default project key', placeholder: 'TUKI' },
 		},
 	},
+	graph: {
+		title: 'Microsoft Graph',
+		note: 'Teams, email, calendars, and SharePoint share this application. No client secret is needed.\nRegister http://localhost under Mobile and desktop applications.\nDelegated permissions: User.Read, Chat.Read, Mail.Read, Sites.Read.All.\nOptional: Calendars.Read.Shared and Calendars.ReadBasic for calendars/free-busy; Mail.Read.Shared for shared email.\nAfter saving, run dev graph login (--all for one sign-in with every supported permission).',
+		fields: {
+			tenantId: { title: 'Tenant ID', message: 'Directory (tenant) ID', required: true, validate: validateGraphId, normalize: (v) => v.trim().toLowerCase() },
+			clientId: { title: 'Client ID', message: 'Application (client) ID', required: true, validate: validateGraphId, normalize: (v) => v.trim().toLowerCase() },
+			defaultSite: { title: 'Default site', message: 'Default SharePoint site URL (optional)', placeholder: 'https://company.sharepoint.com/sites/MySite', validate: validateGraphSite, normalize: (v) => v.trim().replace(/\/+$/, '') },
+		},
+	},
 };
+
+export function fieldProblem(type, key, value) {
+	const field = types[type].fields[key];
+	return value && field.validate ? field.validate(value) : undefined;
+}
 
 const config = new Conf({
 	projectName: 'devtool',
@@ -78,8 +111,10 @@ function clean(connection) {
 	const result = { type: connection.type };
 	if (connection.name) result.name = connection.name;
 	if (connection.default) result.default = true;
-	for (const key of Object.keys(types[connection.type].fields)) {
-		if (typeof connection[key] === 'string' && connection[key] !== '') result[key] = connection[key];
+	for (const [key, field] of Object.entries(types[connection.type].fields)) {
+		if (typeof connection[key] !== 'string') continue;
+		const value = field.normalize ? field.normalize(connection[key]) : connection[key];
+		if (value !== '') result[key] = value;
 	}
 	return result;
 }
@@ -199,7 +234,9 @@ export function setField(ref, field, value) {
 		throw new Error(`Invalid field "${field}" for a ${types[connection.type].title} connection. Valid fields: name, ${fields.join(', ')}`);
 	}
 	connection[field] = value;
-	const problem = field === 'name' ? validateName(connections, connection, index) : undefined;
+	const problem = field === 'name'
+		? validateName(connections, connection, index)
+		: fieldProblem(connection.type, field, value);
 	if (problem) throw new Error(problem);
 	write(connections);
 	return connection;

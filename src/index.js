@@ -7,6 +7,7 @@ import prCmd from './commands/pr.js';
 import jiraCmd from './commands/jira.js';
 import confluenceCmd from './commands/confluence.js';
 import sdCmd from './commands/sd.js';
+import graphCmd from './commands/graph.js';
 
 const { version } = createRequire(import.meta.url)('../package.json');
 
@@ -14,7 +15,7 @@ const program = new Command();
 
 program
 	.name('dev')
-	.description('CLI for Bitbucket PRs, Jira tickets, Confluence pages, and Service Desk tickets')
+	.description('CLI for Bitbucket, Jira, Confluence, Service Desk, and Microsoft Graph')
 	.version(version)
 	.option('--json', 'Output raw JSON')
 	.option('--plain', 'Output compact plain text (no tables, no colors)')
@@ -25,5 +26,6 @@ program.addCommand(prCmd);
 program.addCommand(jiraCmd);
 program.addCommand(confluenceCmd);
 program.addCommand(sdCmd);
+program.addCommand(graphCmd);
 
 program.parse();

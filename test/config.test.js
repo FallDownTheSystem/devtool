@@ -39,11 +39,19 @@ test('legacy single-connection sections migrate to unnamed connections', () => {
 	});
 });
 
+// Fields with a validator need a value of the right shape.
+const samples = {
+	tenantId: '11111111-1111-1111-1111-111111111111',
+	clientId: '22222222-2222-2222-2222-222222222222',
+	defaultSite: 'https://example.sharepoint.com/sites/Test',
+};
+
 test('legacy config set keys create and update the unnamed connection of each type', () => {
 	for (const [type, definition] of Object.entries(store.types)) {
 		for (const name of Object.keys(definition.fields)) {
-			run('set', `${type}.${name}`, 'test-value');
-			assert.equal(store.getConnection(type)[name], 'test-value');
+			const value = samples[name] ?? 'test-value';
+			run('set', `${type}.${name}`, value);
+			assert.equal(store.getConnection(type)[name], value);
 		}
 	}
 	assert.deepEqual(store.listConnections().map((c) => c.type), Object.keys(store.types));
