@@ -13,7 +13,7 @@ import {
 import { spinner } from '../utils/output.js';
 import { handleError } from '../utils/errors.js';
 import { getOutputMode, outputJson } from '../utils/mode.js';
-import { get } from '../config/store.js';
+import { connectionFor } from '../utils/connection.js';
 
 const confluence = new Command('confluence')
 	.description('Confluence pages');
@@ -24,7 +24,7 @@ confluence.command('spaces')
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner('Fetching spaces...').start() : null;
 		try {
-			const spaces = await listSpaces();
+			const spaces = await listSpaces(connectionFor(this, 'confluence'));
 			if (s) s.success({ text: `${spaces.length} space(s) found` });
 			if (mode === 'json') outputJson(curateSpacesJson(spaces));
 			else if (mode === 'plain') plainSpaces(spaces);
@@ -42,7 +42,7 @@ confluence.command('view <id>')
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner(`Fetching page ${id}...`).start() : null;
 		try {
-			const page = await getPage(id);
+			const page = await getPage(connectionFor(this, 'confluence'), id);
 			if (s) s.success({ text: page.title || `Page ${id}` });
 			if (mode === 'json') outputJson(curatePageJson(page));
 			else if (mode === 'plain') plainPageView(page);
@@ -62,15 +62,16 @@ confluence.command('pages')
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner('Fetching pages...').start() : null;
 		try {
+			const connection = connectionFor(this, 'confluence');
 			const spaceId = opts.spaceId;
-			const spaceKey = spaceId ? undefined : opts.space || get('confluence.defaultSpace');
+			const spaceKey = spaceId ? undefined : opts.space || connection.defaultSpace;
 			if (!spaceId && !spaceKey) {
 				if (s) s.error({ text: 'No space specified' });
-				console.error('Specify --space <key>, --space-id <id>, or set confluence.defaultSpace');
+				console.error('Specify --space <key>, --space-id <id>, or set defaultSpace on the Confluence connection');
 				process.exitCode = 1;
 				return;
 			}
-			const pages = await listSpacePages({ spaceId, spaceKey });
+			const pages = await listSpacePages(connection, { spaceId, spaceKey });
 			if (!pages) {
 				if (s) s.error({ text: `Space "${spaceId || spaceKey}" not found` });
 				process.exitCode = 1;
@@ -93,7 +94,7 @@ confluence.command('search <cql>')
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner('Searching...').start() : null;
 		try {
-			const result = await searchPages(cql);
+			const result = await searchPages(connectionFor(this, 'confluence'), cql);
 			const count = result.totalSize || (result.results || []).length;
 			if (s) s.success({ text: `${count} result(s)` });
 			if (mode === 'json') outputJson(curateSearchJson(result));

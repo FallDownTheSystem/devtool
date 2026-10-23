@@ -1,213 +1,212 @@
 import Conf from 'conf';
-import * as p from '@clack/prompts';
-import pc from 'picocolors';
 
-export const schema = {
+export const types = {
 	bitbucket: {
-		type: 'object',
 		title: 'Bitbucket',
-		properties: {
-			workspace: { type: 'string', title: 'Workspace' },
-			defaultRepo: { type: 'string', title: 'Default repo' },
-			email: { type: 'string', title: 'Email' },
-			token: { type: 'string', title: 'Token', writeOnly: true },
+		fields: {
+			workspace: { title: 'Workspace', message: 'Bitbucket workspace slug', placeholder: 'my-workspace', required: true },
+			defaultRepo: { title: 'Default repo', message: 'Bitbucket default repo slug', placeholder: 'my-repo' },
+			email: { title: 'Email', message: 'Bitbucket account email', placeholder: 'you@company.com', required: true },
+			token: { title: 'Token', message: 'Bitbucket API token', secret: true, required: true },
 		},
 	},
 	jira: {
-		type: 'object',
 		title: 'Jira',
-		properties: {
-			baseUrl: { type: 'string', title: 'Base URL' },
-			token: { type: 'string', title: 'Token', writeOnly: true },
-			defaultProject: { type: 'string', title: 'Default project' },
+		fields: {
+			baseUrl: { title: 'Base URL', message: 'Jira Server base URL', placeholder: 'https://jira.company.com', required: true },
+			token: { title: 'Token', message: 'Jira Personal Access Token', secret: true, required: true },
+			defaultProject: { title: 'Default project', message: 'Jira default project key', placeholder: 'PROJ' },
 		},
 	},
 	confluence: {
-		type: 'object',
 		title: 'Confluence',
-		properties: {
-			baseUrl: { type: 'string', title: 'Base URL' },
-			email: { type: 'string', title: 'Email' },
-			token: { type: 'string', title: 'Token', writeOnly: true },
-			defaultSpace: { type: 'string', title: 'Default space' },
+		fields: {
+			baseUrl: { title: 'Base URL', message: 'Confluence base URL (Cloud or Server/Data Center)', placeholder: 'https://company.atlassian.net', required: true },
+			email: { title: 'Email', message: 'Confluence account email (Server/Data Center: username, or empty for a personal access token)', placeholder: 'you@company.com' },
+			token: { title: 'Token', message: 'Confluence API token (Server/Data Center: personal access token or password)', secret: true, required: true },
+			defaultSpace: { title: 'Default space', message: 'Confluence default space key', placeholder: 'DEV' },
 		},
 	},
 	serviceDesk: {
-		type: 'object',
 		title: 'Service Desk',
-		properties: {
-			baseUrl: { type: 'string', title: 'Base URL' },
-			email: { type: 'string', title: 'Email' },
-			token: { type: 'string', title: 'Token', writeOnly: true },
-			defaultProject: { type: 'string', title: 'Default project' },
+		fields: {
+			baseUrl: { title: 'Base URL', message: 'Jira Service Desk Cloud base URL (use canonical *.atlassian.net, not a vanity domain)', placeholder: 'https://company.atlassian.net', required: true },
+			email: { title: 'Email', message: 'Service Desk account email', placeholder: 'you@company.com', required: true },
+			token: { title: 'Token', message: 'Service Desk API token', secret: true, required: true },
+			defaultProject: { title: 'Default project', message: 'Service Desk default project key', placeholder: 'TUKI' },
 		},
 	},
 };
 
 const config = new Conf({
 	projectName: 'devtool',
-	schema,
-	defaults: {
-		bitbucket: { workspace: '', defaultRepo: '', email: '', token: '' },
-		jira: { baseUrl: '', token: '', defaultProject: '' },
-		confluence: { baseUrl: '', email: '', token: '', defaultSpace: '' },
-		serviceDesk: { baseUrl: '', email: '', token: '', defaultProject: '' },
+	schema: {
+		connections: {
+			type: 'array',
+			items: {
+				type: 'object',
+				properties: {
+					type: { type: 'string', enum: Object.keys(types) },
+					name: { type: 'string' },
+					default: { type: 'boolean' },
+				},
+				required: ['type'],
+				additionalProperties: { type: 'string' },
+			},
+		},
 	},
+	defaults: { connections: [] },
 });
 
-export function get(key) {
-	return config.get(key);
+migrateLegacySections();
+
+// Older versions stored exactly one connection per type as a top-level section.
+function migrateLegacySections() {
+	const { connections = [], ...rest } = config.store;
+	const legacy = Object.keys(rest).filter((key) => types[key]);
+	if (!legacy.length) return;
+	for (const type of legacy) {
+		const connection = clean({ type, ...rest[type] });
+		const hasValues = Object.keys(connection).length > 1;
+		if (hasValues && !connections.some((c) => c.type === type && !c.name)) connections.push(connection);
+		delete rest[type];
+	}
+	config.store = { ...rest, connections };
 }
 
-export function set(key, value) {
-	config.set(key, value);
+function clean(connection) {
+	const result = { type: connection.type };
+	if (connection.name) result.name = connection.name;
+	if (connection.default) result.default = true;
+	for (const key of Object.keys(types[connection.type].fields)) {
+		if (typeof connection[key] === 'string' && connection[key] !== '') result[key] = connection[key];
+	}
+	return result;
 }
 
-export function getAll() {
-	return config.store;
+function write(connections) {
+	config.set('connections', connections.map(clean));
 }
 
-export function isConfigured() {
-	const bb = config.get('bitbucket');
-	const jira = config.get('jira');
-	return !!(bb.workspace && bb.token && jira.baseUrl && jira.token);
+// An unnamed connection is addressed by its type, so labels stay unique across all connections.
+export function label(connection) {
+	return connection.name || connection.type;
+}
+
+export function listConnections() {
+	return config.get('connections');
+}
+
+function defaultIndex(connections, type) {
+	const flagged = connections.findIndex((c) => c.type === type && c.default);
+	return flagged !== -1 ? flagged : connections.findIndex((c) => c.type === type);
+}
+
+export function isDefault(connections, index) {
+	return defaultIndex(connections, connections[index].type) === index;
+}
+
+// A reference is a connection label; a bare type falls back to that type's default connection.
+function findIndex(connections, ref) {
+	const byLabel = connections.findIndex((c) => label(c) === ref);
+	if (byLabel !== -1 || !types[ref]) return byLabel;
+	return defaultIndex(connections, ref);
+}
+
+function requireIndex(connections, ref) {
+	const index = findIndex(connections, ref);
+	if (index === -1) throw new Error(`No connection named "${ref}". Run \`dev config show\` to list connections.`);
+	return index;
+}
+
+export function getConnection(type, ref) {
+	const connections = listConnections();
+	const { title } = types[type];
+	if (ref) {
+		const connection = connections[requireIndex(connections, ref)];
+		if (connection.type !== type) {
+			throw new Error(`Connection "${ref}" is a ${types[connection.type].title} connection, not ${title}.`);
+		}
+		return connection;
+	}
+	const index = defaultIndex(connections, type);
+	if (index === -1) throw new Error(`No ${title} connection configured. Run \`dev config add ${type}\` to add one.`);
+	return connections[index];
+}
+
+export function resolveIndex(ref) {
+	return requireIndex(listConnections(), ref);
+}
+
+export function validateName(connections, connection, index = -1) {
+	const { name, type } = connection;
+	if (name) {
+		if (!/^[A-Za-z0-9][\w-]*$/.test(name)) {
+			return 'Use only letters, digits, "-" and "_", starting with a letter or digit';
+		}
+		if (Object.keys(types).some((t) => t.toLowerCase() === name.toLowerCase())) {
+			return `"${name}" is a connection type and cannot be a name`;
+		}
+	}
+	const clash = connections.some((c, i) => i !== index && label(c) === label(connection));
+	if (clash) {
+		return name
+			? `A connection named "${name}" already exists`
+			: `A ${types[type].title} connection without a name already exists; give this one a name`;
+	}
+	return undefined;
+}
+
+// Without an index the connection is appended.
+export function saveConnection(connection, index = -1) {
+	const connections = listConnections();
+	const problem = validateName(connections, connection, index);
+	if (problem) throw new Error(problem);
+	if (index === -1) connections.push(connection);
+	else connections[index] = connection;
+	write(connections);
+}
+
+export function removeConnection(ref) {
+	const connections = listConnections();
+	const [removed] = connections.splice(requireIndex(connections, ref), 1);
+	write(connections);
+	return removed;
+}
+
+export function setDefault(ref) {
+	const connections = listConnections();
+	const target = connections[requireIndex(connections, ref)];
+	for (const c of connections) {
+		if (c.type === target.type) c.default = c === target;
+	}
+	write(connections);
+	return target;
+}
+
+// A bare type with no connection yet creates one, so `config set jira.baseUrl ...` works on a fresh install.
+export function setField(ref, field, value) {
+	const connections = listConnections();
+	let index = findIndex(connections, ref);
+	if (index === -1) {
+		if (!types[ref]) throw new Error(`No connection named "${ref}". Run \`dev config show\` to list connections.`);
+		connections.push({ type: ref });
+		index = connections.length - 1;
+	}
+	const connection = connections[index];
+	const fields = Object.keys(types[connection.type].fields);
+	if (field !== 'name' && !fields.includes(field)) {
+		throw new Error(`Invalid field "${field}" for a ${types[connection.type].title} connection. Valid fields: name, ${fields.join(', ')}`);
+	}
+	connection[field] = value;
+	const problem = field === 'name' ? validateName(connections, connection, index) : undefined;
+	if (problem) throw new Error(problem);
+	write(connections);
+	return connection;
 }
 
 export function configPath() {
 	return config.path;
-}
-
-export async function runSetup() {
-	p.intro(pc.cyan('DevTool Setup'));
-
-	const bb = await p.group({
-		workspace: () => p.text({
-			message: 'Bitbucket workspace slug',
-			placeholder: 'my-workspace',
-			initialValue: config.get('bitbucket.workspace') || '',
-			validate: (v) => !v ? 'Required' : undefined,
-		}),
-		defaultRepo: () => p.text({
-			message: 'Bitbucket default repo slug',
-			placeholder: 'my-repo',
-			initialValue: config.get('bitbucket.defaultRepo') || '',
-			validate: (v) => !v ? 'Required' : undefined,
-		}),
-		email: () => p.text({
-			message: 'Bitbucket account email',
-			placeholder: 'you@company.com',
-			initialValue: config.get('bitbucket.email') || '',
-			validate: (v) => !v ? 'Required' : undefined,
-		}),
-		token: () => p.password({
-			message: 'Bitbucket API token',
-			validate: (v) => !v ? 'Required' : undefined,
-		}),
-	}, {
-		onCancel: () => {
-			p.cancel('Setup cancelled.');
-			process.exit(0);
-		},
-	});
-
-	const jira = await p.group({
-		baseUrl: () => p.text({
-			message: 'Jira Server base URL',
-			placeholder: 'https://jira.company.com',
-			initialValue: config.get('jira.baseUrl') || '',
-			validate: (v) => !v ? 'Required' : undefined,
-		}),
-		token: () => p.password({
-			message: 'Jira Personal Access Token',
-			validate: (v) => !v ? 'Required' : undefined,
-		}),
-		defaultProject: () => p.text({
-			message: 'Jira default project key',
-			placeholder: 'PROJ',
-			initialValue: config.get('jira.defaultProject') || '',
-			validate: (v) => !v ? 'Required' : undefined,
-		}),
-	}, {
-		onCancel: () => {
-			p.cancel('Setup cancelled.');
-			process.exit(0);
-		},
-	});
-
-	const confluence = await p.group({
-		baseUrl: () => p.text({
-			message: 'Confluence base URL (Cloud or Server/Data Center)',
-			placeholder: 'https://company.atlassian.net',
-			initialValue: config.get('confluence.baseUrl') || '',
-		}),
-		email: () => p.text({
-			message: 'Confluence account email (Server/Data Center: username, or empty for a personal access token)',
-			placeholder: 'you@company.com',
-			initialValue: config.get('confluence.email') || '',
-		}),
-		token: () => p.password({
-			message: 'Confluence API token (Server/Data Center: personal access token or password)',
-		}),
-		defaultSpace: () => p.text({
-			message: 'Confluence default space key',
-			placeholder: 'DEV',
-			initialValue: config.get('confluence.defaultSpace') || '',
-		}),
-	}, {
-		onCancel: () => {
-			p.cancel('Setup cancelled.');
-			process.exit(0);
-		},
-	});
-
-	const reuseConfluenceCreds = confluence.email && confluence.token
-		? await p.confirm({
-			message: 'Reuse Confluence email/token for Jira Service Desk Cloud?',
-			initialValue: true,
-		})
-		: false;
-
-	if (p.isCancel(reuseConfluenceCreds)) {
-		p.cancel('Setup cancelled.');
-		process.exit(0);
-	}
-
-	const serviceDesk = await p.group({
-		baseUrl: () => p.text({
-			message: 'Jira Service Desk Cloud base URL (use canonical *.atlassian.net, not a vanity domain)',
-			placeholder: 'https://company.atlassian.net',
-			initialValue: config.get('serviceDesk.baseUrl') || '',
-		}),
-		email: () => reuseConfluenceCreds
-			? Promise.resolve(confluence.email)
-			: p.text({
-				message: 'Service Desk account email',
-				placeholder: 'you@company.com',
-				initialValue: config.get('serviceDesk.email') || '',
-			}),
-		token: () => reuseConfluenceCreds
-			? Promise.resolve(confluence.token)
-			: p.password({
-				message: 'Service Desk API token',
-			}),
-		defaultProject: () => p.text({
-			message: 'Service Desk default project key',
-			placeholder: 'TUKI',
-			initialValue: config.get('serviceDesk.defaultProject') || '',
-		}),
-	}, {
-		onCancel: () => {
-			p.cancel('Setup cancelled.');
-			process.exit(0);
-		},
-	});
-
-	config.set('bitbucket', bb);
-	config.set('jira', jira);
-	config.set('confluence', confluence);
-	config.set('serviceDesk', serviceDesk);
-
-	p.outro(pc.green('Configuration saved!'));
 }
 
 export default config;

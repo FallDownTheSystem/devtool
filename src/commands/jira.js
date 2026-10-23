@@ -15,6 +15,7 @@ import {
 import { spinner } from '../utils/output.js';
 import { handleError } from '../utils/errors.js';
 import { getOutputMode, outputJson } from '../utils/mode.js';
+import { connectionFor } from '../utils/connection.js';
 
 const jira = new Command('jira')
 	.description('Jira tickets');
@@ -26,7 +27,7 @@ jira.command('view <key>')
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner(`Fetching ${key}...`).start() : null;
 		try {
-			const issue = await getIssue(key);
+			const issue = await getIssue(connectionFor(this, 'jira'), key);
 			if (s) s.success({ text: key });
 			if (mode === 'json') outputJson(curateIssueJson(issue));
 			else if (mode === 'plain') plainIssueView(issue);
@@ -43,7 +44,7 @@ jira.command('comments <key>')
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner(`Fetching comments for ${key}...`).start() : null;
 		try {
-			const comments = await getIssueComments(key);
+			const comments = await getIssueComments(connectionFor(this, 'jira'), key);
 			if (s) s.success({ text: `${comments.length} comment(s)` });
 			if (mode === 'json') outputJson(curateCommentsJson(comments));
 			else if (mode === 'plain') plainIssueComments(comments);
@@ -65,7 +66,7 @@ jira.command('search <jql>')
 		const startAt = (parseInt(opts.page, 10) - 1) * perPage;
 		const s = mode === 'rich' ? spinner('Searching...').start() : null;
 		try {
-			const result = await searchIssues(jql, startAt, perPage);
+			const result = await searchIssues(connectionFor(this, 'jira'), jql, startAt, perPage);
 			if (s) s.success({ text: `${result.total} issue(s) matched` });
 			if (mode === 'json') outputJson(curateSearchJson(result));
 			else if (mode === 'plain') plainIssueSearch(result);
@@ -83,7 +84,7 @@ jira.command('children <key>')
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner(`Fetching children of ${key}...`).start() : null;
 		try {
-			const result = await getIssueChildren(key);
+			const result = await getIssueChildren(connectionFor(this, 'jira'), key);
 			if (s) s.success({ text: `${result.total} ${result.source === 'epic' ? 'issue(s) in epic' : 'subtask(s)'}` });
 			if (mode === 'json') outputJson(curateChildrenJson(result));
 			else if (mode === 'plain') plainIssueChildren(result);
@@ -101,7 +102,7 @@ jira.command('mine')
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner('Fetching my issues...').start() : null;
 		try {
-			const result = await getMyIssues();
+			const result = await getMyIssues(connectionFor(this, 'jira'));
 			if (s) s.success({ text: `${result.total} issue(s)` });
 			if (mode === 'json') outputJson(curateSearchJson(result));
 			else if (mode === 'plain') plainIssueSearch(result);

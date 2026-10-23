@@ -16,6 +16,7 @@ import {
 import { spinner } from '../utils/output.js';
 import { handleError } from '../utils/errors.js';
 import { getOutputMode, outputJson } from '../utils/mode.js';
+import { connectionFor } from '../utils/connection.js';
 
 const sd = new Command('sd')
 	.alias('servicedesk')
@@ -28,7 +29,7 @@ sd.command('view <key>')
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner(`Fetching ${key}...`).start() : null;
 		try {
-			const issue = await getIssue(key);
+			const issue = await getIssue(connectionFor(this, 'serviceDesk'), key);
 			if (s) s.success({ text: key });
 			if (mode === 'json') outputJson(curateIssueJson(issue));
 			else if (mode === 'plain') plainIssueView(issue);
@@ -45,7 +46,7 @@ sd.command('comments <key>')
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner(`Fetching comments for ${key}...`).start() : null;
 		try {
-			const comments = await getIssueComments(key);
+			const comments = await getIssueComments(connectionFor(this, 'serviceDesk'), key);
 			if (s) s.success({ text: `${comments.length} comment(s)` });
 			if (mode === 'json') outputJson(curateCommentsJson(comments));
 			else if (mode === 'plain') plainIssueComments(comments);
@@ -66,7 +67,7 @@ sd.command('search <jql>')
 		const perPage = parseInt(opts.perPage, 10);
 		const s = mode === 'rich' ? spinner('Searching...').start() : null;
 		try {
-			const result = await searchIssues(jql, perPage, opts.next || '');
+			const result = await searchIssues(connectionFor(this, 'serviceDesk'), jql, perPage, opts.next || '');
 			if (s) s.success({ text: `${result.issues.length} issue(s) returned` });
 			if (mode === 'json') outputJson(curateSearchJson(result));
 			else if (mode === 'plain') plainIssueSearch(result);
@@ -78,12 +79,12 @@ sd.command('search <jql>')
 	});
 
 sd.command('queues')
-	.description('List Service Desk queues for the default project')
+	.description('List Service Desk queues for the connection\'s default project')
 	.action(async function () {
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner('Fetching queues...').start() : null;
 		try {
-			const queues = await listQueues();
+			const queues = await listQueues(connectionFor(this, 'serviceDesk'));
 			if (s) s.success({ text: `${queues.length} queue(s)` });
 			if (mode === 'json') outputJson(curateQueuesJson(queues));
 			else if (mode === 'plain') plainQueueList(queues);
@@ -103,7 +104,7 @@ sd.command('queue <nameOrId>')
 		const perPage = parseInt(opts.perPage, 10);
 		const s = mode === 'rich' ? spinner(`Fetching queue "${nameOrId}"...`).start() : null;
 		try {
-			const result = await searchByQueue(nameOrId, perPage, opts.next || '');
+			const result = await searchByQueue(connectionFor(this, 'serviceDesk'), nameOrId, perPage, opts.next || '');
 			if (s) s.success({ text: `${result.issues.length} issue(s) in "${result.queue.name}"` });
 			if (mode === 'json') outputJson(curateSearchJson(result));
 			else if (mode === 'plain') plainIssueSearch(result);
@@ -121,7 +122,7 @@ sd.command('mine')
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner('Fetching my tickets...').start() : null;
 		try {
-			const result = await getMyIssues();
+			const result = await getMyIssues(connectionFor(this, 'serviceDesk'));
 			if (s) s.success({ text: `${result.issues.length} ticket(s)` });
 			if (mode === 'json') outputJson(curateSearchJson(result));
 			else if (mode === 'plain') plainIssueSearch(result);

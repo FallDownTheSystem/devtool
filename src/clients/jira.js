@@ -1,13 +1,12 @@
 import { Version2Client } from 'jira.js';
-import { get } from '../config/store.js';
 
-let client = null;
+const clients = new Map();
 
-function getClient() {
-	if (!client) {
-		const token = get('jira.token');
-		client = new Version2Client({
-			host: get('jira.baseUrl'),
+function getClient({ baseUrl, token }) {
+	const key = `${baseUrl}\n${token}`;
+	if (!clients.has(key)) {
+		const client = new Version2Client({
+			host: baseUrl,
 			authentication: {
 				basic: { email: '', apiToken: token },
 			},
@@ -16,20 +15,21 @@ function getClient() {
 			config.headers['Authorization'] = `Bearer ${token}`;
 			return config;
 		});
+		clients.set(key, client);
 	}
-	return client;
+	return clients.get(key);
 }
 
-export async function getIssue(issueKey) {
-	return getClient().issues.getIssue({
+export async function getIssue(connection, issueKey) {
+	return getClient(connection).issues.getIssue({
 		issueIdOrKey: issueKey,
 		fields: ['*all'],
 		expand: 'renderedFields',
 	});
 }
 
-export async function getIssueComments(issueKey) {
-	const result = await getClient().issueComments.getComments({
+export async function getIssueComments(connection, issueKey) {
+	const result = await getClient(connection).issueComments.getComments({
 		issueIdOrKey: issueKey,
 		orderBy: 'created',
 		maxResults: 100,
@@ -37,8 +37,8 @@ export async function getIssueComments(issueKey) {
 	return result.comments || [];
 }
 
-export async function searchIssues(jql, startAt = 0, maxResults = 50) {
-	const result = await getClient().issueSearch.searchForIssuesUsingJql({
+export async function searchIssues(connection, jql, startAt = 0, maxResults = 50) {
+	const result = await getClient(connection).issueSearch.searchForIssuesUsingJql({
 		jql,
 		startAt,
 		maxResults,
@@ -52,21 +52,21 @@ export async function searchIssues(jql, startAt = 0, maxResults = 50) {
 	};
 }
 
-export async function getMyIssues() {
-	const project = get('jira.defaultProject');
+export async function getMyIssues(connection) {
+	const project = connection.defaultProject;
 	const jql = project
 		? `project = ${project} AND assignee = currentUser() AND status != Done ORDER BY updated DESC`
 		: `assignee = currentUser() AND status != Done ORDER BY updated DESC`;
-	return searchIssues(jql);
+	return searchIssues(connection, jql);
 }
 
-export async function getIssueChildren(issueKey) {
-	const issue = await getIssue(issueKey);
+export async function getIssueChildren(connection, issueKey) {
+	const issue = await getIssue(connection, issueKey);
 	const type = issue.fields.issuetype?.name;
 	const parent = { key: issue.key, type, summary: issue.fields.summary };
 
 	if (type === 'Epic') {
-		const response = await getClient().instance.get(
+		const response = await getClient(connection).instance.get(
 			`/rest/agile/1.0/epic/${encodeURIComponent(issueKey)}/issue`,
 			{
 				params: {

@@ -1,31 +1,80 @@
 import { Command } from 'commander';
-import { getAll, set, runSetup, configPath, schema } from '../config/store.js';
+import {
+	types, label, listConnections, removeConnection, setDefault, setField, configPath,
+} from '../config/store.js';
+import { runSetup, addConnection, editConnection, describe } from '../config/setup.js';
 import { heading, field, mask, success, error, divider } from '../utils/output.js';
 
+function attempt(action) {
+	return async (...args) => {
+		try {
+			await action(...args);
+		} catch (err) {
+			error(err.message);
+			process.exitCode = 1;
+		}
+	};
+}
+
+function parseType(input) {
+	if (input === undefined) return undefined;
+	const type = Object.keys(types).find((t) => t.toLowerCase() === input.toLowerCase());
+	if (!type) throw new Error(`Unknown connection type "${input}". Valid types: ${Object.keys(types).join(', ')}`);
+	return type;
+}
+
 const config = new Command('config')
-	.description('Manage configuration');
+	.description('Manage connections');
 
 config
 	.command('setup')
-	.description('Run interactive setup')
-	.action(async () => {
-		await runSetup();
-	});
+	.description('Add or edit connections interactively')
+	.action(attempt(runSetup));
+
+config
+	.command('add [type]')
+	.description(`Add a connection (${Object.keys(types).join(', ')})`)
+	.option('-n, --name <name>', 'Connection name')
+	.action(attempt((type, opts) => addConnection(parseType(type), opts.name)));
+
+config
+	.command('edit <connection>')
+	.description('Edit a connection interactively')
+	.action(attempt(editConnection));
+
+config
+	.command('remove <connection>')
+	.alias('rm')
+	.description('Remove a connection')
+	.action(attempt((ref) => {
+		success(`Removed connection "${label(removeConnection(ref))}"`);
+	}));
+
+config
+	.command('default <connection>')
+	.description('Use a connection when no --connection is given for its type')
+	.action(attempt((ref) => {
+		const connection = setDefault(ref);
+		success(`"${label(connection)}" is now the default ${types[connection.type].title} connection`);
+	}));
 
 config
 	.command('show')
-	.alias('get')
-	.description('Show current configuration')
+	.aliases(['get', 'list'])
+	.description('Show all connections')
 	.action(() => {
-		const all = getAll();
-
-		for (const [section, definition] of Object.entries(schema)) {
-			heading(definition.title);
-			for (const [key, property] of Object.entries(definition.properties)) {
-				const value = all[section]?.[key] ?? '';
-				field(property.title, property.writeOnly ? mask(value) : value);
-			}
+		const connections = listConnections();
+		if (!connections.length) {
+			console.log('\nNo connections configured. Run `dev config add` to add one.');
 		}
+
+		connections.forEach((connection, index) => {
+			heading(describe(connections, index));
+			for (const [key, property] of Object.entries(types[connection.type].fields)) {
+				const value = connection[key] ?? '';
+				field(property.title, property.secret && value ? mask(value) : value);
+			}
+		});
 
 		console.log('');
 		divider();
@@ -35,17 +84,12 @@ config
 
 config
 	.command('set <key> <value>')
-	.description('Set a config value (e.g. bitbucket.workspace my-ws)')
-	.action((key, value) => {
-		const validKeys = Object.entries(schema).flatMap(([section, definition]) =>
-			Object.keys(definition.properties).map((key) => `${section}.${key}`));
-		if (!validKeys.includes(key)) {
-			error(`Invalid key: ${key}`);
-			console.log(`Valid keys: ${validKeys.join(', ')}`);
-			return;
-		}
-		set(key, value);
-		success(`Set ${key}`);
-	});
+	.description('Set a connection field, as <connection>.<field> (e.g. bitbucket.workspace my-ws)')
+	.action(attempt((key, value) => {
+		const dot = key.lastIndexOf('.');
+		if (dot <= 0) throw new Error(`Invalid key: ${key}. Use <connection>.<field>, e.g. jira.baseUrl`);
+		const connection = setField(key.slice(0, dot), key.slice(dot + 1), value);
+		success(`Set ${key.slice(dot + 1)} on connection "${label(connection)}"`);
+	}));
 
 export default config;

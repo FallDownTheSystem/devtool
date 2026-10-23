@@ -1,13 +1,11 @@
-import { get } from '../config/store.js';
-
 function configurationError(reason) {
-	return new Error(`Service Desk configuration error: ${reason}. Check serviceDesk.baseUrl; use the canonical https://<site>.atlassian.net URL.`);
+	return new Error(`Service Desk configuration error: ${reason}. Check the base URL of the Service Desk connection; use the canonical https://<site>.atlassian.net URL.`);
 }
 
-function baseUrl() {
+function baseUrl(connection) {
 	let url;
 	try {
-		url = new URL(get('serviceDesk.baseUrl'));
+		url = new URL(connection.baseUrl);
 	} catch {
 		throw configurationError('invalid base URL');
 	}
@@ -17,9 +15,7 @@ function baseUrl() {
 	return new URL(url.origin);
 }
 
-function authHeader() {
-	const email = get('serviceDesk.email');
-	const token = get('serviceDesk.token');
+function authHeader({ email = '', token = '' }) {
 	return 'Basic ' + Buffer.from(`${email}:${token}`).toString('base64');
 }
 
@@ -58,8 +54,8 @@ async function fetchJson(url, headers = {}) {
 	return data;
 }
 
-async function request(path, params = {}, { extraHeaders = {}, validate = () => true } = {}) {
-	const site = baseUrl();
+async function request(connection, path, params = {}, { extraHeaders = {}, validate = () => true } = {}) {
+	const site = baseUrl(connection);
 	if (!site.hostname.endsWith('.atlassian.net')) {
 		const info = await fetchJson(new URL('/rest/api/2/serverInfo', site));
 		let canonical;
@@ -77,21 +73,21 @@ async function request(path, params = {}, { extraHeaders = {}, validate = () => 
 	for (const [k, v] of Object.entries(params)) {
 		if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
 	}
-	const data = await fetchJson(url, { 'Authorization': authHeader(), ...extraHeaders });
+	const data = await fetchJson(url, { 'Authorization': authHeader(connection), ...extraHeaders });
 	if (!validate(data)) throw configurationError('unexpected API response structure');
 	return data;
 }
 
-export async function getIssue(issueKey) {
-	return request(`/rest/api/3/issue/${encodeURIComponent(issueKey)}`, {
+export async function getIssue(connection, issueKey) {
+	return request(connection, `/rest/api/3/issue/${encodeURIComponent(issueKey)}`, {
 		expand: 'renderedFields',
 	}, {
 		validate: (data) => typeof data.key === 'string' && data.fields && typeof data.fields === 'object' && !Array.isArray(data.fields),
 	});
 }
 
-export async function getIssueComments(issueKey) {
-	const data = await request(`/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`, {
+export async function getIssueComments(connection, issueKey) {
+	const data = await request(connection, `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`, {
 		orderBy: 'created',
 		maxResults: 100,
 	}, {
@@ -100,9 +96,9 @@ export async function getIssueComments(issueKey) {
 	return data.comments;
 }
 
-export async function searchIssues(jql, maxResults = 50, nextPageToken = '') {
+export async function searchIssues(connection, jql, maxResults = 50, nextPageToken = '') {
 	const fields = 'summary,status,assignee,priority,updated,issuetype,reporter,customfield_10010';
-	const data = await request('/rest/api/3/search/jql', {
+	const data = await request(connection, '/rest/api/3/search/jql', {
 		jql,
 		fields,
 		maxResults,
@@ -120,21 +116,21 @@ export async function searchIssues(jql, maxResults = 50, nextPageToken = '') {
 	};
 }
 
-export async function getMyIssues() {
-	const project = get('serviceDesk.defaultProject');
+export async function getMyIssues(connection) {
+	const project = connection.defaultProject;
 	const jql = project
 		? `project = ${project} AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC`
 		: `assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC`;
-	return searchIssues(jql);
+	return searchIssues(connection, jql);
 }
 
-let _serviceDeskIdCache = null;
+// Keyed by site as well as project, because two sites can both have a project with the same key.
+const serviceDeskIds = new Map();
 
-async function getServiceDeskId(projectKey) {
-	if (_serviceDeskIdCache && _serviceDeskIdCache.projectKey === projectKey) {
-		return _serviceDeskIdCache.id;
-	}
-	const data = await request('/rest/servicedeskapi/servicedesk', { start: 0, limit: 100 }, {
+async function getServiceDeskId(connection, projectKey) {
+	const key = `${baseUrl(connection).origin} ${projectKey}`;
+	if (serviceDeskIds.has(key)) return serviceDeskIds.get(key);
+	const data = await request(connection, '/rest/servicedeskapi/servicedesk', { start: 0, limit: 100 }, {
 		extraHeaders: { 'X-ExperimentalApi': 'opt-in' },
 		validate: (data) => Array.isArray(data.values),
 	});
@@ -142,23 +138,23 @@ async function getServiceDeskId(projectKey) {
 	if (!match) {
 		throw new Error(`No Service Desk found for project ${projectKey}`);
 	}
-	_serviceDeskIdCache = { projectKey, id: match.id };
+	serviceDeskIds.set(key, match.id);
 	return match.id;
 }
 
-export async function listQueues() {
-	const projectKey = get('serviceDesk.defaultProject');
-	if (!projectKey) throw new Error('serviceDesk.defaultProject is not configured');
-	const sdId = await getServiceDeskId(projectKey);
-	const data = await request(`/rest/servicedeskapi/servicedesk/${sdId}/queue`, { start: 0, limit: 100 }, {
+export async function listQueues(connection) {
+	const projectKey = connection.defaultProject;
+	if (!projectKey) throw new Error('No default project is set on the Service Desk connection');
+	const sdId = await getServiceDeskId(connection, projectKey);
+	const data = await request(connection, `/rest/servicedeskapi/servicedesk/${sdId}/queue`, { start: 0, limit: 100 }, {
 		extraHeaders: { 'X-ExperimentalApi': 'opt-in' },
 		validate: (data) => Array.isArray(data.values),
 	});
 	return data.values.map((q) => ({ id: q.id, name: q.name, jql: q.jql }));
 }
 
-export async function findQueue(nameOrId) {
-	const queues = await listQueues();
+export async function findQueue(connection, nameOrId) {
+	const queues = await listQueues(connection);
 	const idMatch = queues.find((q) => String(q.id) === String(nameOrId));
 	if (idMatch) return idMatch;
 	const lower = nameOrId.toLowerCase();
@@ -174,8 +170,8 @@ export async function findQueue(nameOrId) {
 	throw new Error(`No queue found matching "${nameOrId}"`);
 }
 
-export async function searchByQueue(nameOrId, maxResults = 50, nextPageToken = '') {
-	const queue = await findQueue(nameOrId);
-	const result = await searchIssues(queue.jql, maxResults, nextPageToken);
+export async function searchByQueue(connection, nameOrId, maxResults = 50, nextPageToken = '') {
+	const queue = await findQueue(connection, nameOrId);
+	const result = await searchIssues(connection, queue.jql, maxResults, nextPageToken);
 	return { ...result, queue };
 }

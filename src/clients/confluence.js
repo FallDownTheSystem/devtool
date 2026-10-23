@@ -1,5 +1,3 @@
-import { get } from '../config/store.js';
-
 const deployments = new Map();
 
 // Custom domains hide the atlassian.net hostname, so anything else is probed:
@@ -17,13 +15,13 @@ async function detectDeployment(origin) {
 	return 'server';
 }
 
-async function connect() {
-	const base = new URL(get('confluence.baseUrl'));
+async function connect({ baseUrl, email, token }) {
+	const base = new URL(baseUrl);
 	if (!deployments.has(base.origin)) deployments.set(base.origin, detectDeployment(base.origin));
 	const kind = await deployments.get(base.origin);
 	// Cloud always serves Confluence under /wiki; Server/Data Center keeps its own context path.
 	const path = kind === 'cloud' ? '/wiki' : base.pathname.replace(/\/+$/, '');
-	return { kind, origin: base.origin, path };
+	return { kind, origin: base.origin, path, email, token };
 }
 
 function apiUrl(conn, path) {
@@ -39,16 +37,14 @@ function nextUrl(conn, link, current) {
 }
 
 // Server/Data Center personal access tokens use Bearer auth; a username switches to Basic.
-function authHeader(conn) {
-	const email = get('confluence.email');
-	const token = get('confluence.token');
-	if (conn.kind === 'server' && !email) return `Bearer ${token}`;
+function authHeader({ kind, email = '', token = '' }) {
+	if (kind === 'server' && !email) return `Bearer ${token}`;
 	return 'Basic ' + Buffer.from(`${email}:${token}`).toString('base64');
 }
 
 async function request(conn, url, params = {}) {
 	if (url.origin !== conn.origin) {
-		throw new Error('Confluence pagination points to a different site. Check confluence.baseUrl.');
+		throw new Error('Confluence pagination points to a different site. Check the base URL of the Confluence connection.');
 	}
 	for (const [k, v] of Object.entries(params)) {
 		if (v !== undefined && v !== null) url.searchParams.set(k, v);
@@ -70,7 +66,7 @@ async function request(conn, url, params = {}) {
 
 	// Server/Data Center answers rejected credentials with a login page instead of a 401.
 	if (!res.headers.get('content-type')?.includes('json')) {
-		const err = new Error('Confluence returned a non-JSON response. Check confluence.baseUrl and confluence.token.');
+		const err = new Error('Confluence returned a non-JSON response. Check the base URL and token of the Confluence connection.');
 		err.url = url.toString();
 		throw err;
 	}
@@ -118,7 +114,7 @@ function serverPage(page) {
 
 // The content listing silently returns nothing for an unknown space key, so the space is looked up first.
 async function serverSpaceKey(conn, { spaceId, spaceKey }) {
-	if (!spaceKey) return (await listSpaces()).find((s) => s.id === String(spaceId))?.key;
+	if (!spaceKey) return (await spaces(conn)).find((s) => s.id === String(spaceId))?.key;
 	try {
 		return (await request(conn, apiUrl(conn, `/rest/api/space/${encodeURIComponent(spaceKey)}`))).key;
 	} catch (err) {
@@ -127,14 +123,17 @@ async function serverSpaceKey(conn, { spaceId, spaceKey }) {
 	}
 }
 
-export async function listSpaces() {
-	const conn = await connect();
+async function spaces(conn) {
 	if (conn.kind === 'cloud') return paginate(conn, '/api/v2/spaces');
 	return (await paginate(conn, '/rest/api/space', { limit: 100 })).map(serverSpace);
 }
 
-export async function getPage(id) {
-	const conn = await connect();
+export async function listSpaces(connection) {
+	return spaces(await connect(connection));
+}
+
+export async function getPage(connection, id) {
+	const conn = await connect(connection);
 	if (conn.kind === 'cloud') {
 		return request(conn, apiUrl(conn, `/api/v2/pages/${id}`), { 'body-format': 'storage' });
 	}
@@ -144,8 +143,8 @@ export async function getPage(id) {
 }
 
 // Cloud lists pages by space ID and Server/Data Center by space key; returns null for an unknown space.
-export async function listSpacePages({ spaceId, spaceKey }) {
-	const conn = await connect();
+export async function listSpacePages(connection, { spaceId, spaceKey }) {
+	const conn = await connect(connection);
 	if (conn.kind === 'cloud') {
 		const id = spaceId
 			?? (await request(conn, apiUrl(conn, '/api/v2/spaces'), { keys: spaceKey })).results?.[0]?.id;
@@ -164,8 +163,8 @@ export async function listSpacePages({ spaceId, spaceKey }) {
 	return pages.map(serverPage);
 }
 
-export async function searchPages(cql) {
-	const conn = await connect();
+export async function searchPages(connection, cql) {
+	const conn = await connect(connection);
 	const result = await request(conn, apiUrl(conn, '/rest/api/search'), { cql });
 	return { ...result, totalSize: result.totalSize ?? result.totalCount };
 }

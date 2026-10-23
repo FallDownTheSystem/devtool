@@ -1,20 +1,16 @@
-import { get } from '../config/store.js';
-
 const BASE_URL = 'https://api.bitbucket.org/2.0';
 
-function authHeader() {
-	const email = get('bitbucket.email');
-	const token = get('bitbucket.token');
-	return 'Basic ' + Buffer.from(`${email}:${token}`).toString('base64');
+function authHeader(connection) {
+	return 'Basic ' + Buffer.from(`${connection.email}:${connection.token}`).toString('base64');
 }
 
-function repoPath(repoOverride) {
-	const workspace = get('bitbucket.workspace');
-	const repo = repoOverride || get('bitbucket.defaultRepo');
-	return `/repositories/${workspace}/${repo}`;
+function repoPath(connection, repoOverride) {
+	const repo = repoOverride || connection.defaultRepo;
+	if (!repo) throw new Error('No repository specified. Pass --repo <slug> or set defaultRepo on the Bitbucket connection.');
+	return `/repositories/${connection.workspace}/${repo}`;
 }
 
-async function request(path, params = {}) {
+async function request(connection, path, params = {}) {
 	const url = new URL(path.startsWith('http') ? path : `${BASE_URL}${path}`);
 	for (const [k, v] of Object.entries(params)) {
 		if (v !== undefined && v !== null) url.searchParams.set(k, v);
@@ -22,7 +18,7 @@ async function request(path, params = {}) {
 
 	const res = await fetch(url, {
 		headers: {
-			'Authorization': authHeader(),
+			'Authorization': authHeader(connection),
 			'Accept': 'application/json',
 		},
 	});
@@ -37,25 +33,25 @@ async function request(path, params = {}) {
 	return res.json();
 }
 
-async function paginate(path, params = {}) {
+async function paginate(connection, path, params = {}) {
 	const results = [];
-	let data = await request(path, params);
+	let data = await request(connection, path, params);
 	results.push(...(data.values || []));
 
 	while (data.next) {
-		data = await request(data.next);
+		data = await request(connection, data.next);
 		results.push(...(data.values || []));
 	}
 
 	return results;
 }
 
-export async function listPullRequests(options = {}) {
+export async function listPullRequests(connection, options = {}) {
 	const { state = 'OPEN', author, repo } = options;
-	const path = `${repoPath(repo)}/pullrequests`;
+	const path = `${repoPath(connection, repo)}/pullrequests`;
 	const params = { state, pagelen: 50 };
 
-	const prs = await paginate(path, params);
+	const prs = await paginate(connection, path, params);
 
 	if (author) {
 		const authorLower = author.toLowerCase();
@@ -68,18 +64,18 @@ export async function listPullRequests(options = {}) {
 	return prs;
 }
 
-export async function getPullRequest(id, repo) {
-	return request(`${repoPath(repo)}/pullrequests/${id}`);
+export async function getPullRequest(connection, id, repo) {
+	return request(connection, `${repoPath(connection, repo)}/pullrequests/${id}`);
 }
 
-export async function getPullRequestComments(id, repo) {
-	return paginate(`${repoPath(repo)}/pullrequests/${id}/comments`);
+export async function getPullRequestComments(connection, id, repo) {
+	return paginate(connection, `${repoPath(connection, repo)}/pullrequests/${id}/comments`);
 }
 
-export async function getPullRequestDiffstat(id, repo) {
-	return paginate(`${repoPath(repo)}/pullrequests/${id}/diffstat`);
+export async function getPullRequestDiffstat(connection, id, repo) {
+	return paginate(connection, `${repoPath(connection, repo)}/pullrequests/${id}/diffstat`);
 }
 
-export async function getPullRequestActivity(id, repo) {
-	return paginate(`${repoPath(repo)}/pullrequests/${id}/activity`);
+export async function getPullRequestActivity(connection, id, repo) {
+	return paginate(connection, `${repoPath(connection, repo)}/pullrequests/${id}/activity`);
 }

@@ -16,21 +16,28 @@ node src/index.js <command>
 npm link
 ```
 
-No build step, no tests, no linter configured yet.
+```bash
+# Run the tests
+npm test
+```
+
+No build step, no linter configured yet.
 
 ## Architecture
 
 ```
 src/
-  index.js          # Entry point — commander program, registers subcommands, auto-setup hook
-  config/store.js   # Conf-based config (persisted to OS config dir via `conf` package)
-  clients/          # API clients (bitbucket.js uses fetch + Basic auth, jira.js uses jira.js SDK + Bearer token)
-  commands/         # Commander subcommands (config, pr, jira)
+  index.js          # Entry point — commander program, global flags, registers subcommands
+  config/store.js   # Connection types, persistence (via `conf`), legacy migration, connection lookup
+  config/setup.js   # Interactive prompts for adding and editing connections
+  clients/          # API clients; every exported function takes the connection object as its first argument
+  commands/         # Commander subcommands (config, pr, jira, confluence, sd)
   formatters/       # Output formatting — each has three variants: rich (colored tables), plain (compact text), JSON (curated objects)
   utils/
     output.js       # Shared UI primitives: spinner, table (cli-table3), heading, field, divider, mask
     errors.js       # handleError — maps HTTP status codes and connection errors to user-friendly messages
     mode.js         # getOutputMode — reads --json/--plain global flags, returns 'json'|'plain'|'rich'
+    connection.js   # connectionFor — resolves the --connection global flag for a command's type
 ```
 
 ### Output Mode Pattern
@@ -40,15 +47,22 @@ Every command supports three output modes via global flags `--json` and `--plain
 - **plain**: no colors, no tables, compact text — suitable for piping
 - **json**: curated JSON (not raw API responses) via `curate*Json` functions in formatters
 
-Commands follow this pattern: check mode → conditionally show spinner → fetch data → format via mode-specific function. The `withMode` helper in `commands/pr.js` abstracts this for simple cases.
+Commands follow this pattern: check mode → conditionally show spinner → resolve the connection with `connectionFor(this, type)` → fetch data → format via mode-specific function.
 
 ### Config
 
-Stored via `conf` package (projectName: `devtool`). Interactive setup runs automatically on first use (preAction hook in index.js). Config keys:
-- `bitbucket.{workspace, defaultRepo, email, token}`
-- `jira.{baseUrl, token, defaultProject}`
+Stored via `conf` package (projectName: `devtool`) as a `connections` array. Each entry has a `type` (`bitbucket`, `jira`, `confluence`, `serviceDesk`), an optional `name`, an optional `default` flag, and the string fields that `types` in `config/store.js` defines for that type. No configuration is required up front; a command fails with a hint only when its type has no connection.
+
+- A connection's label is its name, or its type when unnamed. Labels are unique, so only one unnamed connection per type is allowed and names cannot equal a type.
+- A reference (`--connection`, `config set <ref>.<field>`) matches a label first; a bare type falls back to that type's default connection.
+- The default connection of a type is the one with `default: true`, otherwise the first of that type.
+- Legacy top-level sections (`bitbucket`, `jira`, …) are migrated to unnamed connections when the store loads.
 
 ### API Clients
 
+Clients do not read config; commands pass the resolved connection in. Per-site caches are keyed by site, not held as module singletons.
+
 - **Bitbucket** (`clients/bitbucket.js`): Raw fetch against `api.bitbucket.org/2.0`, Basic auth, manual pagination via `next` links
-- **Jira** (`clients/jira.js`): Uses `jira.js` SDK (Version2Client) with Bearer token auth (overrides SDK's built-in Basic auth via request interceptor)
+- **Jira** (`clients/jira.js`): Uses `jira.js` SDK (Version2Client) with Bearer token auth (overrides SDK's built-in Basic auth via request interceptor); one client per base URL and token
+- **Confluence** (`clients/confluence.js`): Cloud or Server/Data Center, detected per origin
+- **Service Desk** (`clients/serviceDesk.js`): Jira Cloud REST v3 and the Service Desk API, Basic auth
