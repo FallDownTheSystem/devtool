@@ -1,6 +1,6 @@
 {
 	"name": "@falldownthesystem/devtool",
-	"version": "0.6.0",
+	"version": "0.6.1",
 	"description": "CLI for Bitbucket, Jira, Confluence, Service Desk, and Microsoft Graph",
 	"type": "module",
 	"bin": {
