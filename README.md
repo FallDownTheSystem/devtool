@@ -1,6 +1,6 @@
 # dev
 
-A terminal-first CLI for Bitbucket PRs, Jira tickets, Confluence pages, Service Desk tickets, and Microsoft Graph. Microsoft Graph provides read-only access to Teams chats, email, calendars, and SharePoint.
+A terminal-first CLI for Bitbucket PRs, Jira tickets, Confluence pages, Service Desk tickets, and Microsoft Graph. Bitbucket, Jira, Confluence, and Service Desk can also create, change, and delete data when a connection allows it (see [Writing](#writing)). Microsoft Graph provides read-only access to Teams chats, email, calendars, and SharePoint.
 
 ## Install
 
@@ -63,6 +63,103 @@ dev confluence spaces -c wiki         # the Confluence connection named "wiki"
 
 The default is the connection marked with `dev config default`, or otherwise the first connection of that type.
 
+## Writing
+
+Every Bitbucket, Jira, Confluence, and Service Desk connection has two settings:
+
+- **allowWrite** (default `false`): commands that create, change, or delete data fail on this connection until it is enabled. Reads always work.
+- **requireApproval** (default `true`): a write does not run at once. The CLI stores the exact change as a *pending action*, prints its ID, and exits with status `2`.
+
+Set them in `dev config setup` / `dev config edit <connection>`, or directly:
+
+```bash
+dev config set work.allowWrite true
+dev config set work.requireApproval false   # run writes at once on this connection
+```
+
+The settings are a guard against accidental writes, for example by an AI agent that uses the CLI. They are not a security boundary: anything that can run `dev` can also change its configuration.
+
+### Approval
+
+```bash
+$ dev jira comment add PROJ-123 "Deployed to staging."
+Approval required [3f9a2c1e]: Add a comment to PROJ-123
+  Connection: jira
+  Issue: PROJ-123
+  Comment: Deployed to staging.
+Nothing was sent. Show this action to the user and run the approve command only after the user approves it.
+If the user asks for changes, run the command again with the changes and add --replaces 3f9a2c1e.
+Approve: dev pending approve 3f9a2c1e
+Reject:  dev pending reject 3f9a2c1e
+Expires: 2026-10-28T09:00:00.000Z
+
+$ dev pending approve 3f9a2c1e
+✓ Added comment 10234 to PROJ-123
+```
+
+`dev pending approve` runs the stored action, not the original command again, so what runs is exactly what was shown. The preview reads the current state where that helps a decision: the summary of an issue to delete, the text of a comment to edit or delete, the pull request to merge, the transition and its target status, and the page version an edit is based on. A Confluence edit is sent against that version, so a page that changed in the meantime fails with a conflict instead of being overwritten.
+
+```bash
+dev pending                  # list pending actions
+dev pending show <id>        # details; --json includes the full parameters
+dev pending approve <id>     # run it
+dev pending reject <id>      # discard it
+```
+
+The global `--approve` flag runs a write at once, without a pending action. Use it only when the user approved that exact change.
+
+A pending action cannot be edited. When the user asks for changes, run the command again with the changes and `--replaces <id>`:
+
+```bash
+dev jira comment add PROJ-123 "Deployed to production." --replaces 3f9a2c1e
+```
+
+The new request is held as a new pending action, and `3f9a2c1e` is discarded, so the version the user turned down can no longer be approved by mistake. An unknown or expired ID stops the command before anything is held or sent. With `--approve`, the old action is discarded only if the new write succeeds.
+
+Pending actions expire after 24 hours. Approval checks again that the connection exists, still points to the same site, and allows writes. A held merge also fails if the pull request got new commits after the preview. If the server refuses the request (4xx), the action stays pending; if the outcome is unknown (a 5xx error or a timeout), it is removed so it cannot run twice. With `--json`, a held write prints `{"status": "pending_approval", "id": ..., "approve": "dev pending approve <id>", ...}`.
+
+### Write commands
+
+Text can be given inline or with `--file <path>` (`-` reads standard input), which keeps multi-line text out of shell quoting. Comment listings show comment IDs.
+
+```bash
+# Jira Server (dev jira) and Service Desk Cloud (dev sd) share these commands
+dev jira create --summary "Fix login" --type Bug --project PROJ -d "Steps..."
+dev jira edit PROJ-1 --summary "New" --labels a,b --assignee jdoe --field customfield_10010=5
+dev jira edit PROJ-1 --unassign
+dev jira delete PROJ-1 [--delete-subtasks]
+dev jira transitions PROJ-1                  # list available transitions (read)
+dev jira transition PROJ-1 "In Progress"     # by transition name, ID, or target status
+dev jira comment add PROJ-1 "text"           # or --file notes.txt
+dev jira comment edit PROJ-1 <commentId> "text"
+dev jira comment delete PROJ-1 <commentId>
+dev sd comment add TUKI-1 "text"             # internal note by default
+dev sd comment add TUKI-1 "text" --public    # reply visible to the customer
+
+# Bitbucket
+dev pr create --title "Add X" --source feature/x [--destination main] [-d "..."] [--reviewer <accountId>]
+dev pr edit 42 --title "New title"
+dev pr merge 42 [--strategy squash] [--close-source-branch]
+dev pr decline 42
+dev pr approve 42                            # Bitbucket review approval
+dev pr unapprove 42
+dev pr request-changes 42
+dev pr comment add 42 "text" [--path src/a.js --line 10]
+dev pr comment edit 42 <commentId> "text"
+dev pr comment delete 42 <commentId>
+
+# Confluence (bodies are storage format XHTML; --text converts plain text)
+dev confluence view 12345 --storage          # current body in storage format
+dev confluence create --title "Notes" --space DEV [--parent 12345] --file page.xhtml
+dev confluence edit 12345 --file page.xhtml [--title "New"] [-m "version comment"]
+dev confluence delete 12345
+dev confluence comments 12345                # list comments (read)
+dev confluence comment add 12345 "Looks good" --text
+dev confluence comment delete <commentId>
+```
+
+Jira Server takes wiki markup and user names; Service Desk (Jira Cloud) takes plain text, which is converted to paragraphs, and account IDs for `--assignee`. `--field` values are parsed as JSON when valid, so `--field 'customfield_1={"value":"High"}'` sets an option field.
+
 ## Config
 
 Stored via the `conf` package in your OS config directory. Each connection has a type and its own fields:
@@ -72,6 +169,8 @@ Stored via the `conf` package in your OS config directory. Each connection has a
 - **confluence**: base URL, email, API token, default space. Cloud and Server/Data Center are detected from the base URL. For Server/Data Center, include any context path (`https://company.com/confluence`) and leave the email empty to use a personal access token, or set it to your username for Basic auth.
 - **serviceDesk**: base URL, email, API token, default project
 - **graph**: tenant ID, client ID, default SharePoint site (see [Microsoft Graph](#microsoft-graph))
+
+Bitbucket, Jira, Confluence, and Service Desk connections also have the `allowWrite` and `requireApproval` settings (see [Writing](#writing)).
 
 `dev config set <connection>.<field> <value>` addresses a connection by name or type, so the older keys such as `bitbucket.workspace` keep working. Configuration from earlier versions, with one section per service, is converted to unnamed connections on first run.
 

@@ -1,3 +1,4 @@
+import { dirname } from 'node:path';
 import Conf from 'conf';
 
 export function validateGraphId(value) {
@@ -19,9 +20,12 @@ export function validateGraphSite(value) {
 }
 
 // A field's `validate` returns a problem message for a non-empty value; `normalize` runs on every save.
+// A type with a `writeTarget` has write commands, gated per connection by `settings`; the field it names
+// identifies the site that writes go to.
 export const types = {
 	bitbucket: {
 		title: 'Bitbucket',
+		writeTarget: 'workspace',
 		fields: {
 			workspace: { title: 'Workspace', message: 'Bitbucket workspace slug', placeholder: 'my-workspace', required: true },
 			defaultRepo: { title: 'Default repo', message: 'Bitbucket default repo slug', placeholder: 'my-repo' },
@@ -31,6 +35,7 @@ export const types = {
 	},
 	jira: {
 		title: 'Jira',
+		writeTarget: 'baseUrl',
 		fields: {
 			baseUrl: { title: 'Base URL', message: 'Jira Server base URL', placeholder: 'https://jira.company.com', required: true },
 			token: { title: 'Token', message: 'Jira Personal Access Token', secret: true, required: true },
@@ -39,6 +44,7 @@ export const types = {
 	},
 	confluence: {
 		title: 'Confluence',
+		writeTarget: 'baseUrl',
 		fields: {
 			baseUrl: { title: 'Base URL', message: 'Confluence base URL (Cloud or Server/Data Center)', placeholder: 'https://company.atlassian.net', required: true },
 			email: { title: 'Email', message: 'Confluence account email (Server/Data Center: username, or empty for a personal access token)', placeholder: 'you@company.com' },
@@ -48,6 +54,7 @@ export const types = {
 	},
 	serviceDesk: {
 		title: 'Service Desk',
+		writeTarget: 'baseUrl',
 		fields: {
 			baseUrl: { title: 'Base URL', message: 'Jira Service Desk Cloud base URL (use canonical *.atlassian.net, not a vanity domain)', placeholder: 'https://company.atlassian.net', required: true },
 			email: { title: 'Email', message: 'Service Desk account email', placeholder: 'you@company.com', required: true },
@@ -71,6 +78,28 @@ export function fieldProblem(type, key, value) {
 	return value && field.validate ? field.validate(value) : undefined;
 }
 
+// Boolean settings of writable connections. Writes stay off until enabled, and an enabled write
+// waits for approval unless approval is turned off.
+export const settings = {
+	allowWrite: { title: 'Allow write', message: 'Allow commands that create, change, or delete data?', default: false },
+	requireApproval: { title: 'Require approval', message: 'Hold each write until it is approved with `dev pending approve`?', default: true },
+};
+
+export function settingKeys(type) {
+	return types[type].writeTarget ? Object.keys(settings) : [];
+}
+
+export function setting(connection, key) {
+	return typeof connection[key] === 'boolean' ? connection[key] : settings[key].default;
+}
+
+function parseBoolean(value) {
+	const normalized = String(value).trim().toLowerCase();
+	if (['true', 'yes', 'on', '1'].includes(normalized)) return true;
+	if (['false', 'no', 'off', '0'].includes(normalized)) return false;
+	throw new Error(`Invalid value "${value}". Use true or false.`);
+}
+
 const config = new Conf({
 	projectName: 'devtool',
 	schema: {
@@ -82,6 +111,7 @@ const config = new Conf({
 					type: { type: 'string', enum: Object.keys(types) },
 					name: { type: 'string' },
 					default: { type: 'boolean' },
+					...Object.fromEntries(Object.keys(settings).map((key) => [key, { type: 'boolean' }])),
 				},
 				required: ['type'],
 				additionalProperties: { type: 'string' },
@@ -115,6 +145,9 @@ function clean(connection) {
 		if (typeof connection[key] !== 'string') continue;
 		const value = field.normalize ? field.normalize(connection[key]) : connection[key];
 		if (value !== '') result[key] = value;
+	}
+	for (const key of settingKeys(connection.type)) {
+		if (typeof connection[key] === 'boolean') result[key] = connection[key];
 	}
 	return result;
 }
@@ -230,13 +263,14 @@ export function setField(ref, field, value) {
 	}
 	const connection = connections[index];
 	const fields = Object.keys(types[connection.type].fields);
-	if (field !== 'name' && !fields.includes(field)) {
-		throw new Error(`Invalid field "${field}" for a ${types[connection.type].title} connection. Valid fields: name, ${fields.join(', ')}`);
+	const booleans = settingKeys(connection.type);
+	if (field !== 'name' && !fields.includes(field) && !booleans.includes(field)) {
+		throw new Error(`Invalid field "${field}" for a ${types[connection.type].title} connection. Valid fields: ${['name', ...fields, ...booleans].join(', ')}`);
 	}
-	connection[field] = value;
-	const problem = field === 'name'
-		? validateName(connections, connection, index)
-		: fieldProblem(connection.type, field, value);
+	connection[field] = booleans.includes(field) ? parseBoolean(value) : value;
+	let problem;
+	if (field === 'name') problem = validateName(connections, connection, index);
+	else if (fields.includes(field)) problem = fieldProblem(connection.type, field, value);
 	if (problem) throw new Error(problem);
 	write(connections);
 	return connection;
@@ -244,6 +278,10 @@ export function setField(ref, field, value) {
 
 export function configPath() {
 	return config.path;
+}
+
+export function configDirectory() {
+	return dirname(config.path);
 }
 
 export default config;

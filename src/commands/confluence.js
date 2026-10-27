@@ -4,12 +4,16 @@ import {
 	getPage,
 	listSpacePages,
 	searchPages,
+	listPageComments,
 } from '../clients/confluence.js';
 import {
-	formatSpaces, formatPageView, formatPages, formatSearch,
-	plainSpaces, plainPageView, plainPages, plainSearch,
-	curateSpacesJson, curatePageJson, curatePagesJson, curateSearchJson,
+	formatSpaces, formatPageView, formatPages, formatSearch, formatComments,
+	plainSpaces, plainPageView, plainPages, plainSearch, plainComments,
+	curateSpacesJson, curatePageJson, curatePagesJson, curateSearchJson, curateCommentsJson,
 } from '../formatters/confluence.js';
+import * as actions from '../actions/confluence.js';
+import { runWrite, readText, FILE_HELP } from '../utils/write.js';
+import { textToStorage } from '../utils/markup.js';
 import { spinner } from '../utils/output.js';
 import { handleError } from '../utils/errors.js';
 import { getOutputMode, outputJson } from '../utils/mode.js';
@@ -38,13 +42,16 @@ confluence.command('spaces')
 confluence.command('view <id>')
 	.alias('read')
 	.description('View a page')
-	.action(async function (id) {
+	.option('--storage', 'Show the body in storage format (XHTML), the format that edit takes')
+	.action(async function (id, opts) {
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner(`Fetching page ${id}...`).start() : null;
 		try {
 			const page = await getPage(connectionFor(this, 'confluence'), id);
 			if (s) s.success({ text: page.title || `Page ${id}` });
-			if (mode === 'json') outputJson(curatePageJson(page));
+			const storage = page.body?.storage?.value || '';
+			if (mode === 'json') outputJson(opts.storage ? { ...curatePageJson(page), body: storage } : curatePageJson(page));
+			else if (opts.storage) console.log(storage);
 			else if (mode === 'plain') plainPageView(page);
 			else formatPageView(page);
 		} catch (err) {
@@ -104,6 +111,87 @@ confluence.command('search <cql>')
 			if (s) s.error({ text: 'Search failed' });
 			handleError(err, err.url || 'confluence');
 		}
+	});
+
+confluence.command('comments <pageId>')
+	.description('List the footer comments of a page')
+	.action(async function (pageId) {
+		const mode = getOutputMode(this);
+		const s = mode === 'rich' ? spinner(`Fetching comments for page ${pageId}...`).start() : null;
+		try {
+			const comments = await listPageComments(connectionFor(this, 'confluence'), pageId);
+			if (s) s.success({ text: `${comments.length} comment(s)` });
+			if (mode === 'json') outputJson(curateCommentsJson(comments));
+			else if (mode === 'plain') plainComments(comments);
+			else formatComments(comments);
+		} catch (err) {
+			if (s) s.error({ text: `Failed to fetch comments for page ${pageId}` });
+			handleError(err, err.url || 'confluence');
+		}
+	});
+
+const TEXT_HELP = 'Treat the body as plain text instead of storage format (XHTML)';
+
+function body(text, opts) {
+	const value = readText(text, opts.file);
+	return value !== undefined && opts.text ? textToStorage(value) : value;
+}
+
+confluence.command('create')
+	.description('Create a page; the body is in storage format (XHTML) unless --text is given')
+	.requiredOption('-t, --title <text>', 'Title')
+	.option('-b, --body <xhtml>', 'Body')
+	.option('-F, --file <path>', FILE_HELP)
+	.option('--text', TEXT_HELP)
+	.option('-s, --space <key>', 'Space key (overrides default)')
+	.option('--space-id <id>', 'Space ID (instead of a key)')
+	.option('--parent <id>', 'Parent page ID')
+	.action(async function (opts) {
+		await runWrite(this, actions.pageCreate, () => ({
+			title: opts.title,
+			body: body(opts.body, opts),
+			spaceKey: opts.space,
+			spaceId: opts.spaceId,
+			parentId: opts.parent,
+		}));
+	});
+
+confluence.command('edit <id>')
+	.description('Replace the title or body of a page; get the current body with `view <id> --storage`')
+	.option('-t, --title <text>', 'New title')
+	.option('-b, --body <xhtml>', 'New body')
+	.option('-F, --file <path>', FILE_HELP)
+	.option('--text', TEXT_HELP)
+	.option('-m, --message <text>', 'Version comment')
+	.action(async function (id, opts) {
+		await runWrite(this, actions.pageEdit, () => ({
+			id, title: opts.title, body: body(opts.body, opts), message: opts.message,
+		}));
+	});
+
+confluence.command('delete <id>')
+	.alias('rm')
+	.description('Delete a page (Cloud moves it to the trash)')
+	.action(async function (id) {
+		await runWrite(this, actions.pageDelete, () => ({ id }));
+	});
+
+const comment = confluence.command('comment')
+	.description('Add or delete page comments');
+
+comment.command('add <pageId> [body]')
+	.description('Add a footer comment; the body is in storage format (XHTML) unless --text is given')
+	.option('-F, --file <path>', FILE_HELP)
+	.option('--text', TEXT_HELP)
+	.action(async function (pageId, text, opts) {
+		await runWrite(this, actions.commentAdd, () => ({ pageId, body: body(text, opts) }));
+	});
+
+comment.command('delete <commentId>')
+	.alias('rm')
+	.description('Delete a footer comment')
+	.action(async function (id) {
+		await runWrite(this, actions.commentDelete, () => ({ id }));
 	});
 
 export default confluence;

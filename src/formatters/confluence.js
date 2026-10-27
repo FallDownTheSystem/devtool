@@ -1,22 +1,5 @@
 import { table, heading, field, divider, pc } from '../utils/output.js';
-
-function stripHtml(html) {
-	if (!html) return '';
-	return html
-		.replace(/<br\s*\/?>/gi, '\n')
-		.replace(/<\/p>/gi, '\n')
-		.replace(/<\/li>/gi, '\n')
-		.replace(/<\/h[1-6]>/gi, '\n')
-		.replace(/<[^>]+>/g, '')
-		.replace(/&amp;/g, '&')
-		.replace(/&lt;/g, '<')
-		.replace(/&gt;/g, '>')
-		.replace(/&quot;/g, '"')
-		.replace(/&#39;/g, "'")
-		.replace(/&nbsp;/g, ' ')
-		.replace(/\n{3,}/g, '\n\n')
-		.trim();
-}
+import { storageToText } from '../utils/markup.js';
 
 function relativeTime(dateStr) {
 	if (!dateStr) return '';
@@ -57,7 +40,7 @@ export function curatePageJson(page) {
 		status: page.status || null,
 		createdAt: page.createdAt || null,
 		version: page.version?.number || null,
-		body: stripHtml(page.body?.storage?.value),
+		body: storageToText(page.body?.storage?.value),
 	};
 }
 
@@ -79,7 +62,7 @@ export function curateSearchJson(result) {
 			id: r.content?.id || r.id || null,
 			type: r.content?.type || r.type || null,
 			space: r.resultGlobalContainer?.title || null,
-			excerpt: stripHtml(r.excerpt),
+			excerpt: storageToText(r.excerpt),
 			url: r.url || null,
 			lastModified: r.lastModified || r.content?.version?.when || null,
 		})),
@@ -101,7 +84,7 @@ export function plainPageView(page) {
 	console.log(`Status: ${page.status || 'current'}`);
 	if (page.version?.number) console.log(`Version: ${page.version.number}`);
 	if (page.createdAt) console.log(`Created: ${page.createdAt}`);
-	const body = stripHtml(page.body?.storage?.value);
+	const body = storageToText(page.body?.storage?.value);
 	if (body) console.log(`Content:\n${body}`);
 }
 
@@ -119,7 +102,7 @@ export function plainSearch(result) {
 		const title = r.content?.title || r.title || 'Untitled';
 		const id = r.content?.id || '';
 		const space = r.resultGlobalContainer?.title || '';
-		const excerpt = stripHtml(r.excerpt).split('\n')[0].slice(0, 100);
+		const excerpt = storageToText(r.excerpt).split('\n')[0].slice(0, 100);
 		console.log(`${id} [${space}] "${title}" - ${excerpt}`);
 	}
 	if (result.totalSize > results.length) {
@@ -154,7 +137,7 @@ export function formatPageView(page) {
 	if (page.version?.number) field('Version', page.version.number);
 	if (page.createdAt) field('Created', new Date(page.createdAt).toLocaleString());
 
-	const body = stripHtml(page.body?.storage?.value);
+	const body = storageToText(page.body?.storage?.value);
 	if (body) {
 		heading('Content');
 		const lines = body.split('\n');
@@ -200,13 +183,43 @@ export function formatSearch(result) {
 			? (r.content?.title || r.title || '').slice(0, 47) + '...'
 			: (r.content?.title || r.title || ''),
 		r.resultGlobalContainer?.title || '',
-		stripHtml(r.excerpt).split('\n')[0].slice(0, 60),
+		storageToText(r.excerpt).split('\n')[0].slice(0, 60),
 	]);
 
 	console.log(table(['ID', 'Title', 'Space', 'Excerpt'], rows));
 
 	if (result.totalSize > results.length) {
 		console.log(pc.dim(`  Showing ${results.length} of ${result.totalSize} results`));
+	}
+	console.log('');
+}
+
+export function curateCommentsJson(comments) {
+	return comments.map((c) => ({
+		id: c.id,
+		author: c.author,
+		date: c.createdAt,
+		body: storageToText(c.body),
+	}));
+}
+
+export function plainComments(comments) {
+	if (comments.length === 0) { console.log('No comments.'); return; }
+	for (const c of comments) {
+		console.log(`#${c.id} ${c.author || 'Unknown'} (${relativeTime(c.createdAt)}): ${storageToText(c.body)}`);
+	}
+}
+
+export function formatComments(comments) {
+	if (comments.length === 0) {
+		console.log(pc.dim('  No comments.'));
+		return;
+	}
+	for (const c of comments) {
+		console.log(`\n  ${pc.bold(c.author || 'Unknown')} ${pc.dim(`${relativeTime(c.createdAt)} #${c.id}`)}`);
+		for (const line of storageToText(c.body).split('\n')) {
+			console.log(`  ${line}`);
+		}
 	}
 	console.log('');
 }

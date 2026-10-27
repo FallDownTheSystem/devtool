@@ -11,7 +11,7 @@
 	],
 	"scripts": {
 		"start": "node src/index.js",
-		"test": "node --test test/config.test.js test/confluence.test.js test/service-desk.test.js test/graph.test.js"
+		"test": "node --test test/config.test.js test/confluence.test.js test/service-desk.test.js test/graph.test.js test/writes.test.js"
 	},
 	"keywords": [
 		"cli",

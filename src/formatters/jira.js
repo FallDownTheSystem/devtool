@@ -89,6 +89,7 @@ export function curateIssueJson(issue) {
 
 export function curateCommentsJson(comments) {
 	return comments.map((c) => ({
+		id: c.id,
 		author: c.author?.displayName || null,
 		date: c.created,
 		body: typeof c.body === 'string' ? c.body : JSON.stringify(c.body || ''),
@@ -152,7 +153,7 @@ export function plainIssueComments(comments) {
 	if (comments.length === 0) { console.log('No comments.'); return; }
 	for (const c of comments) {
 		const body = typeof c.body === 'string' ? c.body : JSON.stringify(c.body || '');
-		console.log(`${c.author?.displayName || 'Unknown'} (${relativeTime(c.created)}): ${body.trim()}`);
+		console.log(`#${c.id} ${c.author?.displayName || 'Unknown'} (${relativeTime(c.created)}): ${body.trim()}`);
 	}
 }
 
@@ -234,7 +235,7 @@ export function formatIssueComments(comments) {
 	}
 
 	for (const c of comments) {
-		console.log(`\n  ${pc.bold(c.author?.displayName || 'Unknown')} ${pc.dim(relativeTime(c.created))}`);
+		console.log(`\n  ${pc.bold(c.author?.displayName || 'Unknown')} ${pc.dim(`${relativeTime(c.created)} #${c.id}`)}`);
 		if (c.body) {
 			const lines = (typeof c.body === 'string' ? c.body : JSON.stringify(c.body)).trim().split('\n');
 			for (const line of lines) {

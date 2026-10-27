@@ -1,4 +1,5 @@
 import { table, heading, field, divider, pc } from '../utils/output.js';
+import { richText } from '../utils/markup.js';
 
 function statusColor(name) {
 	if (!name) return pc.dim('Unknown');
@@ -28,24 +29,6 @@ function relativeTime(dateStr) {
 	const days = Math.floor(hours / 24);
 	if (days < 30) return `${days}d ago`;
 	return new Date(dateStr).toLocaleDateString();
-}
-
-function adfToText(node) {
-	if (!node) return '';
-	if (typeof node === 'string') return node;
-	if (Array.isArray(node)) return node.map(adfToText).join('');
-	if (node.type === 'text') return node.text || '';
-	if (node.type === 'hardBreak') return '\n';
-	const inner = adfToText(node.content);
-	const blockTypes = new Set(['paragraph', 'heading', 'bulletList', 'orderedList', 'listItem', 'codeBlock', 'blockquote']);
-	if (blockTypes.has(node.type)) return inner + '\n';
-	return inner;
-}
-
-function descriptionText(field) {
-	if (!field) return '';
-	if (typeof field === 'string') return field;
-	return adfToText(field).trim();
 }
 
 function requestType(fields) {
@@ -81,15 +64,16 @@ export function curateIssueJson(issue) {
 		components: (f.components || []).map((c) => c.name),
 		created: f.created,
 		updated: f.updated,
-		description: descriptionText(f.description),
+		description: richText(f.description),
 	};
 }
 
 export function curateCommentsJson(comments) {
 	return comments.map((c) => ({
+		id: c.id,
 		author: c.author?.displayName || null,
 		date: c.created,
-		body: descriptionText(c.body),
+		body: richText(c.body),
 	}));
 }
 
@@ -152,14 +136,14 @@ export function plainIssueView(issue) {
 	if (f.components?.length > 0) console.log(`Components: ${f.components.map((c) => c.name).join(', ')}`);
 	console.log(`Created: ${f.created}`);
 	console.log(`Updated: ${f.updated}`);
-	const desc = descriptionText(f.description);
+	const desc = richText(f.description);
 	if (desc) console.log(`Description:\n${desc}`);
 }
 
 export function plainIssueComments(comments) {
 	if (comments.length === 0) { console.log('No comments.'); return; }
 	for (const c of comments) {
-		console.log(`${c.author?.displayName || 'Unknown'} (${relativeTime(c.created)}): ${descriptionText(c.body)}`);
+		console.log(`#${c.id} ${c.author?.displayName || 'Unknown'} (${relativeTime(c.created)}): ${richText(c.body)}`);
 	}
 }
 
@@ -199,7 +183,7 @@ export function formatIssueView(issue) {
 	field('Created', new Date(f.created).toLocaleString());
 	field('Updated', new Date(f.updated).toLocaleString());
 
-	const desc = descriptionText(f.description);
+	const desc = richText(f.description);
 	if (desc) {
 		heading('Description');
 		const lines = desc.split('\n');
@@ -222,8 +206,8 @@ export function formatIssueComments(comments) {
 	}
 
 	for (const c of comments) {
-		console.log(`\n  ${pc.bold(c.author?.displayName || 'Unknown')} ${pc.dim(relativeTime(c.created))}`);
-		const body = descriptionText(c.body);
+		console.log(`\n  ${pc.bold(c.author?.displayName || 'Unknown')} ${pc.dim(`${relativeTime(c.created)} #${c.id}`)}`);
+		const body = richText(c.body);
 		if (body) {
 			for (const line of body.split('\n')) {
 				console.log(`  ${line}`);

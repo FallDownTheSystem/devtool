@@ -6,6 +6,8 @@ import {
 	getMyIssues,
 	getIssueChildren,
 } from '../clients/jira.js';
+import actions, { dialect } from '../actions/jira.js';
+import { addIssueWriteCommands } from './issueWrites.js';
 import {
 	formatIssueView, formatIssueComments, formatIssueSearch,
 	plainIssueView, plainIssueComments, plainIssueSearch,
@@ -112,5 +114,12 @@ jira.command('mine')
 			handleError(err, 'jira my issues');
 		}
 	});
+
+addIssueWriteCommands(jira, {
+	dialect,
+	actions,
+	noun: 'an issue',
+	userHelp: 'Assignee user name',
+});
 
 export default jira;

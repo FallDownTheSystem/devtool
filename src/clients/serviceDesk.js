@@ -1,3 +1,5 @@
+import { jsonInit, apiError } from '../utils/http.js';
+
 function configurationError(reason) {
 	return new Error(`Service Desk configuration error: ${reason}. Check the base URL of the Service Desk connection; use the canonical https://<site>.atlassian.net URL.`);
 }
@@ -19,11 +21,9 @@ function authHeader({ email = '', token = '' }) {
 	return 'Basic ' + Buffer.from(`${email}:${token}`).toString('base64');
 }
 
-async function fetchJson(url, headers = {}) {
-	const res = await fetch(url, {
-		redirect: 'manual',
-		headers: { 'Accept': 'application/json', ...headers },
-	});
+// Only a write that documents an empty response may receive one; any other empty answer is a misconfiguration.
+async function fetchJson(url, headers = {}, { method, body, allowEmpty = false } = {}) {
+	const res = await fetch(url, { ...jsonInit({ method, body, headers }), redirect: 'manual' });
 
 	if (res.redirected || (res.status >= 300 && res.status < 400)) {
 		throw configurationError('the API returned a redirect; authentication may not reach the intended site');
@@ -31,12 +31,8 @@ async function fetchJson(url, headers = {}) {
 	if (res.url && new URL(res.url).origin !== url.origin) {
 		throw configurationError('the API response came from an unexpected host');
 	}
-	if (!res.ok) {
-		const err = new Error(`Service Desk API error: ${res.status} ${res.statusText}`);
-		err.status = res.status;
-		err.url = url.toString();
-		throw err;
-	}
+	if (!res.ok) throw await apiError('Service Desk', res, url);
+	if (allowEmpty && res.status === 204) return null;
 
 	const contentType = res.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
 	if (!/^application\/(?:[\w.+-]+\+)?json$/.test(contentType || '')) {
@@ -54,7 +50,7 @@ async function fetchJson(url, headers = {}) {
 	return data;
 }
 
-async function request(connection, path, params = {}, { extraHeaders = {}, validate = () => true } = {}) {
+async function request(connection, path, params = {}, { extraHeaders = {}, validate = () => true, method, body, allowEmpty } = {}) {
 	const site = baseUrl(connection);
 	if (!site.hostname.endsWith('.atlassian.net')) {
 		const info = await fetchJson(new URL('/rest/api/2/serverInfo', site));
@@ -73,13 +69,17 @@ async function request(connection, path, params = {}, { extraHeaders = {}, valid
 	for (const [k, v] of Object.entries(params)) {
 		if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
 	}
-	const data = await fetchJson(url, { 'Authorization': authHeader(connection), ...extraHeaders });
-	if (!validate(data)) throw configurationError('unexpected API response structure');
+	const data = await fetchJson(url, { 'Authorization': authHeader(connection), ...extraHeaders }, { method, body, allowEmpty });
+	if (data !== null && !validate(data)) throw configurationError('unexpected API response structure');
 	return data;
 }
 
+function issuePath(issueKey, suffix = '') {
+	return `/rest/api/3/issue/${encodeURIComponent(issueKey)}${suffix}`;
+}
+
 export async function getIssue(connection, issueKey) {
-	return request(connection, `/rest/api/3/issue/${encodeURIComponent(issueKey)}`, {
+	return request(connection, issuePath(issueKey), {
 		expand: 'renderedFields',
 	}, {
 		validate: (data) => typeof data.key === 'string' && data.fields && typeof data.fields === 'object' && !Array.isArray(data.fields),
@@ -87,7 +87,7 @@ export async function getIssue(connection, issueKey) {
 }
 
 export async function getIssueComments(connection, issueKey) {
-	const data = await request(connection, `/rest/api/3/issue/${encodeURIComponent(issueKey)}/comment`, {
+	const data = await request(connection, issuePath(issueKey, '/comment'), {
 		orderBy: 'created',
 		maxResults: 100,
 	}, {
@@ -174,4 +174,70 @@ export async function searchByQueue(connection, nameOrId, maxResults = 50, nextP
 	const queue = await findQueue(connection, nameOrId);
 	const result = await searchIssues(connection, queue.jql, maxResults, nextPageToken);
 	return { ...result, queue };
+}
+
+export async function getTransitions(connection, issueKey) {
+	const data = await request(connection, issuePath(issueKey, '/transitions'), {}, {
+		validate: (data) => Array.isArray(data.transitions),
+	});
+	return data.transitions;
+}
+
+// `fields` is a Jira REST v3 fields object; rich-text fields must already be ADF.
+export async function createIssue(connection, fields) {
+	return request(connection, '/rest/api/3/issue', {}, {
+		method: 'POST',
+		body: { fields },
+		validate: (data) => typeof data.key === 'string',
+	});
+}
+
+export async function editIssue(connection, issueKey, fields) {
+	await request(connection, issuePath(issueKey), {}, { method: 'PUT', body: { fields }, allowEmpty: true });
+}
+
+export async function deleteIssue(connection, issueKey, deleteSubtasks = false) {
+	await request(connection, issuePath(issueKey), { deleteSubtasks: deleteSubtasks ? 'true' : undefined }, {
+		method: 'DELETE',
+		allowEmpty: true,
+	});
+}
+
+export async function transitionIssue(connection, issueKey, transitionId) {
+	await request(connection, issuePath(issueKey, '/transitions'), {}, {
+		method: 'POST',
+		body: { transition: { id: transitionId } },
+		allowEmpty: true,
+	});
+}
+
+// The Service Desk endpoint distinguishes a customer-visible reply from an internal note.
+export async function addComment(connection, issueKey, body, { isPublic = false } = {}) {
+	return request(connection, `/rest/servicedeskapi/request/${encodeURIComponent(issueKey)}/comment`, {}, {
+		method: 'POST',
+		body: { body, public: isPublic },
+		validate: (data) => data.id !== undefined,
+	});
+}
+
+export async function getComment(connection, issueKey, id) {
+	return request(connection, issuePath(issueKey, `/comment/${encodeURIComponent(id)}`), {}, {
+		validate: (data) => data.id !== undefined,
+	});
+}
+
+// `body` is ADF, like every rich-text value this client sends.
+export async function updateComment(connection, issueKey, id, body) {
+	return request(connection, issuePath(issueKey, `/comment/${encodeURIComponent(id)}`), {}, {
+		method: 'PUT',
+		body: { body },
+		validate: (data) => data.id !== undefined,
+	});
+}
+
+export async function deleteComment(connection, issueKey, id) {
+	await request(connection, issuePath(issueKey, `/comment/${encodeURIComponent(id)}`), {}, {
+		method: 'DELETE',
+		allowEmpty: true,
+	});
 }

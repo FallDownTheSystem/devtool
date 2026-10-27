@@ -1,3 +1,5 @@
+import { jsonInit, apiError } from '../utils/http.js';
+
 const deployments = new Map();
 
 // Custom domains hide the atlassian.net hostname, so anything else is probed:
@@ -42,7 +44,7 @@ function authHeader({ kind, email = '', token = '' }) {
 	return 'Basic ' + Buffer.from(`${email}:${token}`).toString('base64');
 }
 
-async function request(conn, url, params = {}) {
+async function request(conn, url, params = {}, { method = 'GET', body } = {}) {
 	if (url.origin !== conn.origin) {
 		throw new Error('Confluence pagination points to a different site. Check the base URL of the Confluence connection.');
 	}
@@ -50,19 +52,9 @@ async function request(conn, url, params = {}) {
 		if (v !== undefined && v !== null) url.searchParams.set(k, v);
 	}
 
-	const res = await fetch(url, {
-		headers: {
-			'Authorization': authHeader(conn),
-			'Accept': 'application/json',
-		},
-	});
-
-	if (!res.ok) {
-		const err = new Error(`Confluence API error: ${res.status} ${res.statusText}`);
-		err.status = res.status;
-		err.url = url.toString();
-		throw err;
-	}
+	const res = await fetch(url, jsonInit({ method, body, headers: { 'Authorization': authHeader(conn) } }));
+	if (!res.ok) throw await apiError('Confluence', res, url);
+	if (res.status === 204) return null;
 
 	// Server/Data Center answers rejected credentials with a login page instead of a 401.
 	if (!res.headers.get('content-type')?.includes('json')) {
@@ -142,12 +134,15 @@ export async function getPage(connection, id) {
 	}));
 }
 
+async function cloudSpaceId(conn, { spaceId, spaceKey }) {
+	return spaceId ?? (await request(conn, apiUrl(conn, '/api/v2/spaces'), { keys: spaceKey })).results?.[0]?.id;
+}
+
 // Cloud lists pages by space ID and Server/Data Center by space key; returns null for an unknown space.
 export async function listSpacePages(connection, { spaceId, spaceKey }) {
 	const conn = await connect(connection);
 	if (conn.kind === 'cloud') {
-		const id = spaceId
-			?? (await request(conn, apiUrl(conn, '/api/v2/spaces'), { keys: spaceKey })).results?.[0]?.id;
+		const id = await cloudSpaceId(conn, { spaceId, spaceKey });
 		if (!id) return null;
 		return paginate(conn, `/api/v2/spaces/${id}/pages`);
 	}
@@ -161,6 +156,124 @@ export async function listSpacePages(connection, { spaceId, spaceKey }) {
 		limit: 100,
 	});
 	return pages.map(serverPage);
+}
+
+// Cloud v2 and Server v1 nest a storage-format body differently.
+function cloudBody(value) {
+	return { representation: 'storage', value };
+}
+
+function serverBody(value) {
+	return { storage: { value, representation: 'storage' } };
+}
+
+function spaceNotFound({ spaceId, spaceKey }) {
+	return new Error(`Confluence space "${spaceId || spaceKey}" not found`);
+}
+
+export async function createPage(connection, { spaceId, spaceKey, title, body, parentId }) {
+	const conn = await connect(connection);
+	if (conn.kind === 'cloud') {
+		const id = await cloudSpaceId(conn, { spaceId, spaceKey });
+		if (!id) throw spaceNotFound({ spaceId, spaceKey });
+		return request(conn, apiUrl(conn, '/api/v2/pages'), {}, {
+			method: 'POST',
+			body: { spaceId: id, status: 'current', title, parentId, body: cloudBody(body) },
+		});
+	}
+	const key = await serverSpaceKey(conn, { spaceId, spaceKey });
+	if (!key) throw spaceNotFound({ spaceId, spaceKey });
+	return serverPage(await request(conn, apiUrl(conn, '/rest/api/content'), {}, {
+		method: 'POST',
+		body: {
+			type: 'page',
+			title,
+			space: { key },
+			ancestors: parentId ? [{ id: parentId }] : undefined,
+			body: serverBody(body),
+		},
+	}));
+}
+
+// `version` is the number the change was prepared against, so a concurrent edit fails with a conflict instead of being overwritten.
+export async function updatePage(connection, id, { title, body, version, message }) {
+	const conn = await connect(connection);
+	const next = { number: version + 1, message };
+	if (conn.kind === 'cloud') {
+		return request(conn, apiUrl(conn, `/api/v2/pages/${id}`), {}, {
+			method: 'PUT',
+			body: { id, status: 'current', title, body: cloudBody(body), version: next },
+		});
+	}
+	return serverPage(await request(conn, apiUrl(conn, `/rest/api/content/${id}`), {}, {
+		method: 'PUT',
+		body: { id, type: 'page', title, body: serverBody(body), version: next },
+	}));
+}
+
+export async function deletePage(connection, id) {
+	const conn = await connect(connection);
+	const path = conn.kind === 'cloud' ? `/api/v2/pages/${id}` : `/rest/api/content/${id}`;
+	await request(conn, apiUrl(conn, path), {}, { method: 'DELETE' });
+}
+
+function serverComment(comment) {
+	return {
+		id: comment.id,
+		author: comment.history?.createdBy?.displayName || null,
+		createdAt: comment.history?.createdDate || comment.version?.when || null,
+		body: comment.body?.storage?.value || '',
+	};
+}
+
+// Cloud comments name their author by account ID only.
+function cloudComment(comment) {
+	return {
+		id: comment.id,
+		author: comment.version?.authorId || null,
+		createdAt: comment.version?.createdAt || null,
+		body: comment.body?.storage?.value || '',
+	};
+}
+
+export async function listPageComments(connection, pageId) {
+	const conn = await connect(connection);
+	if (conn.kind === 'cloud') {
+		return (await paginate(conn, `/api/v2/pages/${pageId}/footer-comments`, { 'body-format': 'storage' })).map(cloudComment);
+	}
+	const comments = await paginate(conn, `/rest/api/content/${pageId}/child/comment`, {
+		expand: 'body.storage,version,history',
+		limit: 100,
+	});
+	return comments.map(serverComment);
+}
+
+export async function getPageComment(connection, id) {
+	const conn = await connect(connection);
+	if (conn.kind === 'cloud') {
+		return cloudComment(await request(conn, apiUrl(conn, `/api/v2/footer-comments/${id}`), { 'body-format': 'storage' }));
+	}
+	return serverComment(await request(conn, apiUrl(conn, `/rest/api/content/${id}`), { expand: 'body.storage,version,history' }));
+}
+
+export async function addPageComment(connection, pageId, body) {
+	const conn = await connect(connection);
+	if (conn.kind === 'cloud') {
+		return cloudComment(await request(conn, apiUrl(conn, '/api/v2/footer-comments'), {}, {
+			method: 'POST',
+			body: { pageId, body: cloudBody(body) },
+		}));
+	}
+	return serverComment(await request(conn, apiUrl(conn, '/rest/api/content'), {}, {
+		method: 'POST',
+		body: { type: 'comment', container: { id: pageId, type: 'page' }, body: serverBody(body) },
+	}));
+}
+
+export async function deletePageComment(connection, id) {
+	const conn = await connect(connection);
+	const path = conn.kind === 'cloud' ? `/api/v2/footer-comments/${id}` : `/rest/api/content/${id}`;
+	await request(conn, apiUrl(conn, path), {}, { method: 'DELETE' });
 }
 
 export async function searchPages(connection, cql) {

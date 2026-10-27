@@ -1,15 +1,19 @@
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import {
-	types, label, listConnections, isDefault, saveConnection, validateName, resolveIndex, fieldProblem,
+	types, settings, setting, label, listConnections, isDefault, saveConnection, validateName, resolveIndex, fieldProblem,
 } from './store.js';
 
-function answer(value) {
+function confirm(value) {
 	if (p.isCancel(value)) {
 		p.cancel('Setup cancelled.');
 		process.exit(0);
 	}
-	return (value ?? '').trim();
+	return value;
+}
+
+function answer(value) {
+	return (confirm(value) ?? '').trim();
 }
 
 export function describe(connections, index) {
@@ -73,6 +77,16 @@ async function promptConnection(type, existing = {}, index = -1) {
 			? answer(await p.password({ message, validate }))
 			: answer(await p.text({ message, placeholder: field.placeholder, initialValue: existing[key] || '', validate }));
 		connection[key] = value || (keep ? existing[key] : '');
+	}
+
+	if (types[type].writeTarget) {
+		connection.allowWrite = confirm(await p.confirm({
+			message: settings.allowWrite.message,
+			initialValue: setting(existing, 'allowWrite'),
+		}));
+		connection.requireApproval = connection.allowWrite
+			? confirm(await p.confirm({ message: settings.requireApproval.message, initialValue: setting(existing, 'requireApproval') }))
+			: setting(existing, 'requireApproval');
 	}
 
 	saveConnection(connection, index);

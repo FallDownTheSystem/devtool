@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import {
-	types, label, listConnections, removeConnection, setDefault, setField, configPath,
+	types, settings, setting, settingKeys, label, listConnections, removeConnection, setDefault, setField, configPath,
 } from '../config/store.js';
 import { runSetup, addConnection, editConnection, describe } from '../config/setup.js';
 import { heading, field, mask, success, error, divider } from '../utils/output.js';
@@ -74,6 +74,9 @@ config
 				const value = connection[key] ?? '';
 				field(property.title, property.secret && value ? mask(value) : value);
 			}
+			for (const key of settingKeys(connection.type)) {
+				field(settings[key].title, setting(connection, key) ? 'yes' : 'no');
+			}
 		});
 
 		console.log('');
@@ -84,7 +87,7 @@ config
 
 config
 	.command('set <key> <value>')
-	.description('Set a connection field, as <connection>.<field> (e.g. bitbucket.workspace my-ws)')
+	.description('Set a connection field, as <connection>.<field> (e.g. bitbucket.workspace my-ws, jira.allowWrite true)')
 	.action(attempt((key, value) => {
 		const dot = key.lastIndexOf('.');
 		if (dot <= 0) throw new Error(`Invalid key: ${key}. Use <connection>.<field>, e.g. jira.baseUrl`);

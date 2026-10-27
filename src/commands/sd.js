@@ -7,6 +7,8 @@ import {
 	listQueues,
 	searchByQueue,
 } from '../clients/serviceDesk.js';
+import actions, { dialect } from '../actions/serviceDesk.js';
+import { addIssueWriteCommands } from './issueWrites.js';
 import {
 	formatIssueView, formatIssueComments, formatIssueSearch,
 	plainIssueView, plainIssueComments, plainIssueSearch,
@@ -132,5 +134,12 @@ sd.command('mine')
 			handleError(err, 'sd my tickets');
 		}
 	});
+
+addIssueWriteCommands(sd, {
+	dialect,
+	actions,
+	noun: 'a ticket',
+	userHelp: 'Assignee account ID',
+});
 
 export default sd;

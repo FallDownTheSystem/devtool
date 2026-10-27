@@ -60,6 +60,46 @@ export async function getMyIssues(connection) {
 	return searchIssues(connection, jql);
 }
 
+export async function getTransitions(connection, issueKey) {
+	const result = await getClient(connection).issues.getTransitions({ issueIdOrKey: encodeURIComponent(issueKey) });
+	return result.transitions || [];
+}
+
+export async function createIssue(connection, fields) {
+	return getClient(connection).issues.createIssue({ fields });
+}
+
+export async function editIssue(connection, issueKey, fields) {
+	await getClient(connection).issues.editIssue({ issueIdOrKey: encodeURIComponent(issueKey), fields });
+}
+
+export async function deleteIssue(connection, issueKey, deleteSubtasks = false) {
+	await getClient(connection).issues.deleteIssue({ issueIdOrKey: encodeURIComponent(issueKey), deleteSubtasks });
+}
+
+export async function transitionIssue(connection, issueKey, transitionId) {
+	await getClient(connection).issues.doTransition({
+		issueIdOrKey: encodeURIComponent(issueKey),
+		transition: { id: transitionId },
+	});
+}
+
+export async function getComment(connection, issueKey, id) {
+	return getClient(connection).issueComments.getComment({ issueIdOrKey: encodeURIComponent(issueKey), id });
+}
+
+export async function addComment(connection, issueKey, body) {
+	return getClient(connection).issueComments.addComment({ issueIdOrKey: encodeURIComponent(issueKey), comment: body });
+}
+
+export async function updateComment(connection, issueKey, id, body) {
+	return getClient(connection).issueComments.updateComment({ issueIdOrKey: encodeURIComponent(issueKey), id, comment: body });
+}
+
+export async function deleteComment(connection, issueKey, id) {
+	await getClient(connection).issueComments.deleteComment({ issueIdOrKey: encodeURIComponent(issueKey), id });
+}
+
 export async function getIssueChildren(connection, issueKey) {
 	const issue = await getIssue(connection, issueKey);
 	const type = issue.fields.issuetype?.name;

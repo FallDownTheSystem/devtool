@@ -8,6 +8,7 @@ import jiraCmd from './commands/jira.js';
 import confluenceCmd from './commands/confluence.js';
 import sdCmd from './commands/sd.js';
 import graphCmd from './commands/graph.js';
+import pendingCmd from './commands/pending.js';
 
 const { version } = createRequire(import.meta.url)('../package.json');
 
@@ -19,7 +20,9 @@ program
 	.version(version)
 	.option('--json', 'Output raw JSON')
 	.option('--plain', 'Output compact plain text (no tables, no colors)')
-	.option('-c, --connection <name>', 'Connection to use (defaults to the default connection of the command\'s type)');
+	.option('-c, --connection <name>', 'Connection to use (defaults to the default connection of the command\'s type)')
+	.option('--approve', 'Run a write at once instead of holding it for approval. Use only when the user approved this exact change')
+	.option('--replaces <id>', 'Discard this pending action in favor of the write being requested, e.g. after the user asked for changes');
 
 program.addCommand(configCmd);
 program.addCommand(prCmd);
@@ -27,5 +30,6 @@ program.addCommand(jiraCmd);
 program.addCommand(confluenceCmd);
 program.addCommand(sdCmd);
 program.addCommand(graphCmd);
+program.addCommand(pendingCmd);
 
 program.parse();

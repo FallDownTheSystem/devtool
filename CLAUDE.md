@@ -30,15 +30,24 @@ src/
   index.js          # Entry point — commander program, global flags, registers subcommands
   config/store.js   # Connection types, persistence (via `conf`), legacy migration, connection lookup
   config/setup.js   # Interactive prompts for adding and editing connections
+  config/pending.js # Pending write actions awaiting approval, one JSON file each under <config dir>/pending
   clients/          # API clients; every exported function takes the connection object as its first argument
-  commands/         # Commander subcommands (config, pr, jira, confluence, sd)
+  actions/          # Write actions (prepare/summary/details/run/report); index.js is the registry by action name
+  commands/         # Commander subcommands (config, pr, jira, confluence, sd, pending); issueWrites.js adds the write commands shared by jira and sd
   formatters/       # Output formatting — each has three variants: rich (colored tables), plain (compact text), JSON (curated objects)
   utils/
     output.js       # Shared UI primitives: spinner, table (cli-table3), heading, field, divider, mask
     errors.js       # handleError — maps HTTP status codes and connection errors to user-friendly messages
     mode.js         # getOutputMode — reads --json/--plain global flags, returns 'json'|'plain'|'rich'
     connection.js   # connectionFor — resolves the --connection global flag for a command's type
+    write.js        # runWrite — the gate every write command goes through; execute, text and --field helpers
+    markup.js       # Conversions between plain text, ADF (Jira Cloud), and Confluence storage format
+    http.js         # jsonInit and apiError, shared by the fetch-based clients
 ```
+
+### Writes
+
+Every write command calls `runWrite(cmd, action, buildInput)`. It refuses unless the connection has `allowWrite`; then `action.prepare` validates, resolves defaults, and reads what `run` needs (Confluence page version, transition ID). With `requireApproval` (the default) and no global `--approve`, `action.preview` reads display-only state (current comment text, PR head), the params are stored as a pending action with the connection's `writeTarget` site, and the command exits with status 2; `dev pending approve <id>` checks the site, runs `action.verify` (state that must not have changed, e.g. a PR head before merge), and then runs the stored params through `execute`, so what runs is exactly what was previewed. Summaries and details are derived from the stored params, never stored. Approval restores the pending action when the server answered with an error, and drops it when the outcome is unknown. A new write operation is a client function, an action registered through `actions/index.js`, and a command that calls `runWrite`.
 
 ### Output Mode Pattern
 
@@ -51,7 +60,7 @@ Commands follow this pattern: check mode → conditionally show spinner → reso
 
 ### Config
 
-Stored via `conf` package (projectName: `devtool`) as a `connections` array. Each entry has a `type` (`bitbucket`, `jira`, `confluence`, `serviceDesk`, `graph`), an optional `name`, an optional `default` flag, and the string fields that `types` in `config/store.js` defines for that type. A field may define `validate` (checked by setup prompts and `config set`) and `normalize` (applied on every save); a type may define a `note` shown before its setup prompts. No configuration is required up front; a command fails with a hint only when its type has no connection.
+Stored via `conf` package (projectName: `devtool`) as a `connections` array. Each entry has a `type` (`bitbucket`, `jira`, `confluence`, `serviceDesk`, `graph`), an optional `name`, an optional `default` flag, the boolean `settings` (`allowWrite`, `requireApproval`) for `writable` types, and the string fields that `types` in `config/store.js` defines for that type. A field may define `validate` (checked by setup prompts and `config set`) and `normalize` (applied on every save); a type may define a `note` shown before its setup prompts. No configuration is required up front; a command fails with a hint only when its type has no connection.
 
 - A connection's label is its name, or its type when unnamed. Labels are unique, so only one unnamed connection per type is allowed and names cannot equal a type.
 - A reference (`--connection`, `config set <ref>.<field>`) matches a label first; a bare type falls back to that type's default connection.

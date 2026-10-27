@@ -99,6 +99,7 @@ export function curateCommentsJson(comments) {
 		.filter((c) => !c.deleted)
 		.sort((a, b) => new Date(a.created_on) - new Date(b.created_on))
 		.map((c) => ({
+			id: c.id,
 			author: c.user.display_name,
 			date: c.created_on,
 			content: c.content?.raw || '',
@@ -156,7 +157,7 @@ export function plainPrComments(comments) {
 	if (sorted.length === 0) { console.log('No comments.'); return; }
 	for (const c of sorted) {
 		const inline = c.inline ? ` [${c.inline.path}:${c.inline.from || c.inline.to}]` : '';
-		console.log(`${c.user.display_name} (${relativeTime(c.created_on)})${inline}: ${(c.content?.raw || '').trim()}`);
+		console.log(`#${c.id} ${c.user.display_name} (${relativeTime(c.created_on)})${inline}: ${(c.content?.raw || '').trim()}`);
 	}
 }
 
@@ -238,7 +239,7 @@ export function formatPrComments(comments) {
 
 	for (const c of sorted) {
 		const inline = c.inline ? pc.dim(` [${c.inline.path}:${c.inline.from || c.inline.to}]`) : '';
-		console.log(`\n  ${pc.bold(c.user.display_name)} ${pc.dim(relativeTime(c.created_on))}${inline}`);
+		console.log(`\n  ${pc.bold(c.user.display_name)} ${pc.dim(`${relativeTime(c.created_on)} #${c.id}`)}${inline}`);
 		if (c.content?.raw) {
 			const lines = c.content.raw.trim().split('\n');
 			for (const line of lines) {
