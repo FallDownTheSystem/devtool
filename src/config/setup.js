@@ -1,8 +1,13 @@
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import {
-	types, settings, setting, label, listConnections, isDefault, saveConnection, validateName, resolveIndex, fieldProblem,
+	types, settings, setting, label, listConnections, isDefault, saveConnection, validateName, resolveIndex, fieldProblem, storeSecret,
 } from './store.js';
+import { lookupSecret } from './secrets.js';
+
+function secretOf(connection, key) {
+	return lookupSecret(connection, label(connection), key).value;
+}
 
 function confirm(value) {
 	if (p.isCancel(value)) {
@@ -33,7 +38,7 @@ async function chooseType() {
 
 // Service Desk Cloud often shares an Atlassian account with Confluence Cloud.
 async function reusableCredentials(connections) {
-	const sources = connections.filter((c) => c.type === 'confluence' && c.email && c.token);
+	const sources = connections.filter((c) => c.type === 'confluence' && c.email && secretOf(c, 'token'));
 	if (!sources.length) return null;
 	const choice = answer(await p.select({
 		message: 'Service Desk credentials',
@@ -42,7 +47,8 @@ async function reusableCredentials(connections) {
 			{ value: '', label: 'Enter new credentials' },
 		],
 	}));
-	return sources.find((c) => label(c) === choice) ?? null;
+	const source = sources.find((c) => label(c) === choice);
+	return source ? { email: source.email, token: secretOf(source, 'token') } : null;
 }
 
 async function promptConnection(type, existing = {}, index = -1) {
@@ -61,12 +67,22 @@ async function promptConnection(type, existing = {}, index = -1) {
 
 	const reused = type === 'serviceDesk' ? await reusableCredentials(connections) : null;
 
+	// New secrets go to the OS credential store when the user chooses it, after the connection is saved.
+	const secrets = {};
+	const storeOrKeep = async (key, value) => {
+		const inStore = confirm(await p.confirm({ message: 'Save the token in the OS credential store instead of the config file?', initialValue: true }));
+		if (inStore) secrets[key] = value;
+		else connection[key] = value;
+	};
+
 	for (const [key, field] of Object.entries(types[type].fields)) {
 		if (reused && (key === 'email' || key === 'token')) {
-			connection[key] = reused[key];
+			if (field.secret) await storeOrKeep(key, reused[key]);
+			else connection[key] = reused[key];
 			continue;
 		}
-		const keep = field.secret && existing[key];
+		// A secret kept in the credential store or the environment stays there.
+		const keep = field.secret && (existing[key] || (existing.type && secretOf(existing, key)));
 		const message = keep ? `${field.message} (leave empty to keep the current one)` : field.message;
 		const validate = (v) => {
 			const value = (v ?? '').trim();
@@ -76,7 +92,8 @@ async function promptConnection(type, existing = {}, index = -1) {
 		const value = field.secret
 			? answer(await p.password({ message, validate }))
 			: answer(await p.text({ message, placeholder: field.placeholder, initialValue: existing[key] || '', validate }));
-		connection[key] = value || (keep ? existing[key] : '');
+		if (field.secret && value) await storeOrKeep(key, value);
+		else connection[key] = value || (keep ? existing[key] ?? '' : '');
 	}
 
 	if (types[type].writeTarget) {
@@ -90,6 +107,13 @@ async function promptConnection(type, existing = {}, index = -1) {
 	}
 
 	saveConnection(connection, index);
+	for (const [key, value] of Object.entries(secrets)) {
+		try {
+			storeSecret(label(connection), key, value);
+		} catch (err) {
+			p.log.warn(`${err.message}\nThe connection was saved without its ${key}. Run \`dev config token ${label(connection)}\` to try again, or \`dev config set ${label(connection)}.${key} <value>\` to keep it in the config file.`);
+		}
+	}
 	return connection;
 }
 

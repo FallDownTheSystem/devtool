@@ -338,6 +338,17 @@ test('dev api reads with the connection credentials and never prints them', asyn
 	assert.equal(requests.length, 3);
 });
 
+test('a token from the environment is sent and never printed', async () => {
+	store.saveConnection({ type: 'jira', baseUrl });
+	respond = () => [200, { name: 'me' }];
+	const read = await devWith({ DEV_JIRA_TOKEN: 'env-token' }, 'api', 'jira', '/rest/api/2/myself');
+	assert.equal(read.status, 0, read.output);
+	assert.equal(requests[0].auth, 'Bearer env-token');
+	const shown = await devWith({ DEV_JIRA_TOKEN: 'env-token' }, 'config', 'show');
+	assert.match(shown.output, /Token: env-•+ \(environment DEV_JIRA_TOKEN\)/);
+	assert.doesNotMatch(shown.output, /env-token/);
+});
+
 test('a stalled request fails with a timeout instead of hanging', async () => {
 	jira();
 	respond = () => 'hang';

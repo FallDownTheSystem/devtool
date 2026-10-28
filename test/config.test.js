@@ -53,7 +53,7 @@ test('legacy config set keys create and update the unnamed connection of each ty
 		for (const name of Object.keys(definition.fields)) {
 			const value = samples[name] ?? 'test-value';
 			run('set', `${type}.${name}`, value);
-			assert.equal(store.getConnection(type)[name], value);
+			assert.equal(store.listConnections().find((c) => c.type === type)[name], value);
 		}
 	}
 	assert.deepEqual(store.listConnections().map((c) => c.type), Object.keys(store.types));
@@ -121,4 +121,43 @@ test('--connection selects a connection for a command', () => {
 	assert.equal(status, 1);
 	assert.match(output, /No connection named "nope"/);
 	assert.match(dev('pr', 'list', '-c', 'bitbucket').output, /No repository specified/);
+});
+
+test('a token comes from the config file, then the environment, then the credential store', async (t) => {
+	const { storedSecrets } = await import('./helpers/config.js');
+	storedSecrets.clear();
+	store.saveConnection({ type: 'jira', name: 'work', baseUrl: 'https://jira.example.invalid' });
+	assert.throws(() => store.getConnection('jira'), /No token for connection "work"\. Store it with `dev config token work`, set DEV_WORK_TOKEN/);
+
+	storedSecrets.set('work.token', 'from-store');
+	assert.equal(store.getConnection('jira').token, 'from-store');
+	process.env.DEV_WORK_TOKEN = 'from-env';
+	t.after(() => delete process.env.DEV_WORK_TOKEN);
+	assert.equal(store.getConnection('jira').token, 'from-env');
+	store.setField('work', 'token', 'from-config');
+	assert.equal(store.getConnection('jira', 'work').token, 'from-config');
+	// The resolved token is never written back to the config file.
+	assert.equal(store.listConnections()[0].token, 'from-config');
+});
+
+test('storing a token moves it out of the config file, and it follows renames and removal', async () => {
+	const { storedSecrets } = await import('./helpers/config.js');
+	storedSecrets.clear();
+	store.saveConnection({ type: 'confluence', baseUrl: 'https://wiki.example.invalid', token: 'secret' });
+	const result = store.storeSecret('confluence', 'token');
+	assert.equal(result.account, 'confluence.token');
+	assert.equal(result.removedFromConfig, true);
+	assert.equal(store.listConnections()[0].token, undefined);
+	assert.equal(store.getConnection('confluence').token, 'secret');
+
+	// An unnamed connection is addressed by its type; naming it changes its label.
+	store.setField('confluence', 'name', 'wiki');
+	assert.deepEqual([...storedSecrets], [['wiki.token', 'secret']]);
+	store.saveConnection({ ...store.listConnections()[0], name: 'docs' }, 0);
+	assert.deepEqual([...storedSecrets], [['docs.token', 'secret']]);
+	assert.equal(store.getConnection('confluence').token, 'secret');
+
+	store.removeConnection('docs');
+	assert.equal(storedSecrets.size, 0);
+	assert.throws(() => store.storeSecret('nope', 'token', 'x'), /No connection named "nope"/);
 });

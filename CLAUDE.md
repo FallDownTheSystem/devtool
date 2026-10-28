@@ -30,6 +30,7 @@ src/
   index.js          # Entry point — commander program, global flags, registers subcommands
   config/store.js   # Connection types, persistence (via `conf`), legacy migration, connection lookup
   config/setup.js   # Interactive prompts for adding and editing connections
+  config/secrets.js # Secret fields from the config file, then DEV_<LABEL>_<FIELD>, then the OS credential store (@napi-rs/keyring, service "devtool", account "<label>.<field>")
   config/pending.js # Pending write actions awaiting approval, one JSON file each under <config dir>/pending
   clients/          # API clients; every exported function takes the connection object as its first argument
   actions/          # Write actions (prepare/summary/details/run/report); index.js is the registry by action name
@@ -68,6 +69,7 @@ Stored via `conf` package (projectName: `devtool`) as a `connections` array. Eac
 - A connection's label is its name, or its type when unnamed. Labels are unique, so only one unnamed connection per type is allowed and names cannot equal a type.
 - A reference (`--connection`, `config set <ref>.<field>`) matches a label first; a bare type falls back to that type's default connection.
 - The default connection of a type is the one with `default: true`, otherwise the first of that type.
+- `getConnection` returns a copy with secret fields filled by `withSecrets`; a required secret set nowhere fails there. Renames move credential-store entries, removal deletes them. Tests replace `credentialStore` with an in-memory map (`test/helpers/config.js`).
 - Legacy top-level sections (`bitbucket`, `jira`, …) are migrated to unnamed connections when the store loads.
 
 ### API Clients

@@ -222,6 +222,23 @@ Stored via the `conf` package in your OS config directory. Each connection has a
 
 Bitbucket, Jira, Confluence, and Service Desk connections also have the `allowWrite` and `requireApproval` settings (see [Writing](#writing)).
 
+### Tokens
+
+A connection's token is looked up in this order:
+
+1. the config file (`dev config set <connection>.token <value>`)
+2. the environment variable `DEV_<CONNECTION>_TOKEN`, e.g. `DEV_WORK_TOKEN`, or `DEV_JIRA_TOKEN` for an unnamed Jira connection (characters other than letters and digits become `_`)
+3. the OS credential store (Windows Credential Manager, macOS Keychain, Linux Secret Service), under service `devtool` and account `<connection>.token`
+
+```bash
+dev config token work                 # hidden prompt; stores the token in the credential store
+op read op://vault/jira | dev config token work   # or from standard input
+dev config token work --move          # move the token from the config file to the credential store
+dev config token work --remove        # delete it from the credential store
+```
+
+Storing a token removes it from the config file, which would otherwise be used first. `dev config add` and `dev config edit` offer the credential store when you enter a token. Renaming a connection moves its entry, and removing the connection deletes it. `dev config show` shows where each token comes from, masked.
+
 `dev config set <connection>.<field> <value>` addresses a connection by name or type, so the older keys such as `bitbucket.workspace` keep working. Configuration from earlier versions, with one section per service, is converted to unnamed connections on first run.
 
 ## Microsoft Graph

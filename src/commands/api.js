@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import * as bitbucket from '../clients/bitbucket.js';
 import { site } from '../clients/jira.js';
 import * as confluence from '../clients/confluence.js';
-import { listConnections, resolveIndex, types } from '../config/store.js';
+import { listConnections, resolveIndex, types, withSecrets } from '../config/store.js';
 import { apiUrl, relativePath, parseQuery, select, parseSelect, nextPageUrl, collectAllPages } from '../utils/api.js';
 import { apiError, timeoutSignal } from '../utils/http.js';
 import { handleError } from '../utils/errors.js';
@@ -61,7 +61,7 @@ function connectionFor(ref) {
 	if (!clients[connection.type]) {
 		throw new Error(`dev api does not support ${types[connection.type].title} connections. Supported types: ${Object.keys(clients).join(', ')}.`);
 	}
-	return connection;
+	return withSecrets(connection);
 }
 
 function postBody(type, relative, json) {

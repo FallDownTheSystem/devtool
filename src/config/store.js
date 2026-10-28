@@ -1,5 +1,6 @@
 import { dirname } from 'node:path';
 import Conf from 'conf';
+import { lookupSecret, credentialStore, account, envName } from './secrets.js';
 
 export function validateGraphId(value) {
 	return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value?.trim() || '')
@@ -217,6 +218,80 @@ function servesProject(connection, project) {
 
 // `type` is a connection type or a list of them, in order of preference for the default. Without `ref`,
 // a `project` key picks the connection whose projects or default project include it.
+export function secretFields(type) {
+	return Object.keys(types[type].fields).filter((key) => types[type].fields[key].secret);
+}
+
+// A copy of the connection with each secret field filled from the config file, the environment, or the
+// OS credential store, in that order. A required secret that is set nowhere fails here, before a
+// request goes out without credentials.
+export function withSecrets(connection) {
+	const result = { ...connection };
+	for (const field of secretFields(connection.type)) {
+		const { value, error } = lookupSecret(connection, label(connection), field);
+		if (value) {
+			result[field] = value;
+			continue;
+		}
+		if (!types[connection.type].fields[field].required) continue;
+		const name = label(connection);
+		throw new Error(`No ${field} for connection "${name}". Store it with \`dev config token ${name}\`, set ${envName(name, field)}, or run \`dev config set ${name}.${field} <value>\`.${error ? `\n${error.message}` : ''}`);
+	}
+	return result;
+}
+
+// Moves the credential-store entries of a connection whose label changes, so its secrets follow it.
+// Entries that cannot be read are left alone: a store that cannot be opened holds nothing to move.
+function moveSecrets(connection, from, to) {
+	if (from === to) return () => {};
+	const moved = [];
+	for (const field of secretFields(connection.type)) {
+		let value;
+		try {
+			value = credentialStore.get(account(from, field));
+		} catch {
+			continue;
+		}
+		if (!value) continue;
+		credentialStore.set(account(to, field), value);
+		moved.push(field);
+	}
+	// The old entries are removed only after the config file names the connection by its new label.
+	return () => { for (const field of moved) credentialStore.delete(account(from, field)); };
+}
+
+function deleteSecrets(connection) {
+	for (const field of secretFields(connection.type)) {
+		try {
+			credentialStore.delete(account(label(connection), field));
+		} catch {
+			// Nothing can be stored in a credential store that cannot be opened.
+		}
+	}
+}
+
+// Saves a secret field in the OS credential store and removes it from the config file, which would
+// otherwise take precedence. Without `value`, the value in the config file is moved.
+export function storeSecret(ref, field, value) {
+	const connections = listConnections();
+	const connection = connections[requireIndex(connections, ref)];
+	if (!secretFields(connection.type).includes(field)) {
+		throw new Error(`A ${types[connection.type].title} connection has no ${field}.`);
+	}
+	const secret = value ?? connection[field];
+	if (!secret) throw new Error(`Connection "${label(connection)}" has no ${field} in the config file to move.`);
+	credentialStore.set(account(label(connection), field), secret);
+	const removedFromConfig = Boolean(connection[field]);
+	delete connection[field];
+	write(connections);
+	return { connection, account: account(label(connection), field), removedFromConfig };
+}
+
+export function deleteStoredSecret(ref, field) {
+	const connection = listConnections()[resolveIndex(ref)];
+	return { connection, deleted: credentialStore.delete(account(label(connection), field)) };
+}
+
 export function getConnection(type, ref, project) {
 	const connections = listConnections();
 	const allowed = [type].flat();
@@ -226,18 +301,18 @@ export function getConnection(type, ref, project) {
 		if (!allowed.includes(connection.type)) {
 			throw new Error(`Connection "${ref}" is a ${types[connection.type].title} connection, not ${title}.`);
 		}
-		return connection;
+		return withSecrets(connection);
 	}
 	if (project) {
 		const matches = connections.filter((c) => allowed.includes(c.type) && servesProject(c, project));
 		if (matches.length > 1) {
 			throw new Error(`Project ${project.toUpperCase()} is listed on several connections (${matches.map(label).join(', ')}). Pass --connection, or remove it from all but one.`);
 		}
-		if (matches.length) return matches[0];
+		if (matches.length) return withSecrets(matches[0]);
 	}
 	for (const t of allowed) {
 		const index = defaultIndex(connections, t);
-		if (index !== -1) return connections[index];
+		if (index !== -1) return withSecrets(connections[index]);
 	}
 	throw new Error(`No ${title} connection configured. Run \`dev config add ${allowed[0]}\` to add one.`);
 }
@@ -270,15 +345,18 @@ export function saveConnection(connection, index = -1) {
 	const connections = listConnections();
 	const problem = validateName(connections, connection, index);
 	if (problem) throw new Error(problem);
+	const finish = index === -1 ? () => {} : moveSecrets(connection, label(connections[index]), label(connection));
 	if (index === -1) connections.push(connection);
 	else connections[index] = connection;
 	write(connections);
+	finish();
 }
 
 export function removeConnection(ref) {
 	const connections = listConnections();
 	const [removed] = connections.splice(requireIndex(connections, ref), 1);
 	write(connections);
+	deleteSecrets(removed);
 	return removed;
 }
 
@@ -302,6 +380,7 @@ export function setField(ref, field, value) {
 		index = connections.length - 1;
 	}
 	const connection = connections[index];
+	const before = label(connection);
 	const fields = Object.keys(types[connection.type].fields);
 	const booleans = settingKeys(connection.type);
 	if (field !== 'name' && !fields.includes(field) && !booleans.includes(field)) {
@@ -312,7 +391,9 @@ export function setField(ref, field, value) {
 	if (field === 'name') problem = validateName(connections, connection, index);
 	else if (fields.includes(field)) problem = fieldProblem(connection.type, field, value);
 	if (problem) throw new Error(problem);
+	const finish = moveSecrets(connection, before, label(connection));
 	write(connections);
+	finish();
 	return connection;
 }
 
