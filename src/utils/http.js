@@ -4,7 +4,7 @@ const DEFAULT_TIMEOUT_SECONDS = 30;
 
 // Every API request gives up after DEV_TIMEOUT seconds (default 30), so a stalled server fails with a
 // clear message instead of hanging the command.
-export function requestTimeout() {
+function requestTimeout() {
 	const seconds = Number(process.env.DEV_TIMEOUT);
 	return (Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_TIMEOUT_SECONDS) * 1000;
 }

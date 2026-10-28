@@ -45,7 +45,7 @@ before(async () => {
 			const answer = respond(entry);
 			if (answer === 'hang') return;
 			const [status, data] = answer;
-			res.writeHead(status, { 'content-type': 'application/json' });
+			res.writeHead(status, { 'content-type': 'application/json', ...answer[2] });
 			res.end(data === undefined ? '' : JSON.stringify(data));
 		});
 	});
@@ -347,6 +347,14 @@ test('a token from the environment is sent and never printed', async () => {
 	const shown = await devWith({ DEV_JIRA_TOKEN: 'env-token' }, 'config', 'show');
 	assert.match(shown.output, /Token: env-•+ \(environment DEV_JIRA_TOKEN\)/);
 	assert.doesNotMatch(shown.output, /env-token/);
+});
+
+test('Jira Server credentials answered as an anonymous user fail instead of returning empty data', async () => {
+	jira();
+	respond = () => [200, { issues: [], total: 0 }, { 'x-seraph-loginreason': 'AUTHENTICATED_FAILED' }];
+	const { status, output } = await dev('jira', 'search', 'project = PROJ');
+	assert.equal(status, 1);
+	assert.match(output, /Authentication failed/);
 });
 
 test('a stalled request fails with a timeout instead of hanging', async () => {

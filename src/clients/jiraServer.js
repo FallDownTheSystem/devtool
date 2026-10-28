@@ -1,8 +1,5 @@
-import { Version2Client } from 'jira.js';
-import { requestTimeout } from '../utils/http.js';
+import { jsonInit, apiError } from '../utils/http.js';
 import { collectPages, pickIssueType } from '../utils/jiraFields.js';
-
-const clients = new Map();
 
 // Jira Server/Data Center through REST v2: wiki-markup strings and user names.
 
@@ -11,49 +8,51 @@ function authHeader({ email = '', token = '' }) {
 	return email ? 'Basic ' + Buffer.from(`${email}:${token}`).toString('base64') : `Bearer ${token}`;
 }
 
-function getClient(connection) {
-	const { baseUrl, email = '', token } = connection;
-	const key = `${baseUrl}\n${email}\n${token}`;
-	if (!clients.has(key)) {
-		const client = new Version2Client({
-			host: baseUrl,
-			authentication: {
-				basic: { email, apiToken: token },
-			},
-			baseRequestConfig: { timeout: requestTimeout() },
-		});
-		client.instance.interceptors.request.use((config) => {
-			config.headers['Authorization'] = authHeader(connection);
-			return config;
-		});
-		clients.set(key, client);
+function url(connection, path, params = {}) {
+	const result = new URL(`${connection.baseUrl.replace(/\/+$/, '')}${path}`);
+	for (const [k, v] of Object.entries(params)) {
+		if (v !== undefined && v !== null && v !== '') result.searchParams.set(k, Array.isArray(v) ? v.join(',') : v);
 	}
-	return clients.get(key);
+	return result;
+}
+
+async function request(connection, path, params, { method, body } = {}) {
+	const target = url(connection, path, params);
+	const res = await fetch(target, jsonInit({ method, body, headers: { 'Authorization': authHeader(connection) } }));
+	// Jira answers rejected credentials on some endpoints as an anonymous user with status 200 and says so
+	// in this header; treating that as data would hide a revoked token behind empty results.
+	if (/^AUTHENTICAT(ED_FAILED|ION_DENIED)$/.test(res.headers.get('x-seraph-loginreason') || '')) {
+		const err = new Error('Jira API error: 401 the credentials were rejected');
+		err.status = 401;
+		err.url = target.toString();
+		throw err;
+	}
+	if (!res.ok) throw await apiError('Jira', res, target);
+	const text = await res.text();
+	return text ? JSON.parse(text) : null;
+}
+
+const get = (connection, path, params) => request(connection, path, params);
+
+function issuePath(issueKey, suffix = '') {
+	return `/rest/api/2/issue/${encodeURIComponent(issueKey)}${suffix}`;
 }
 
 export async function getIssue(connection, issueKey) {
-	return getClient(connection).issues.getIssue({
-		issueIdOrKey: issueKey,
-		fields: ['*all'],
-		expand: 'renderedFields,names',
-	});
+	return get(connection, issuePath(issueKey), { fields: '*all', expand: 'renderedFields,names' });
 }
 
 export async function getIssueComments(connection, issueKey) {
-	const result = await getClient(connection).issueComments.getComments({
-		issueIdOrKey: issueKey,
-		orderBy: 'created',
-		maxResults: 100,
-	});
+	const result = await get(connection, issuePath(issueKey, '/comment'), { orderBy: 'created', maxResults: 100 });
 	return result.comments || [];
 }
 
 export async function searchIssues(connection, jql, startAt = 0, maxResults = 50) {
-	const result = await getClient(connection).issueSearch.searchForIssuesUsingJql({
+	const result = await get(connection, '/rest/api/2/search', {
 		jql,
 		startAt,
 		maxResults,
-		fields: ['key', 'summary', 'status', 'assignee', 'priority', 'updated'],
+		fields: 'key,summary,status,assignee,priority,updated',
 	});
 	return {
 		issues: result.issues || [],
@@ -72,56 +71,45 @@ export async function getMyIssues(connection) {
 }
 
 export async function getTransitions(connection, issueKey) {
-	const result = await getClient(connection).issues.getTransitions({ issueIdOrKey: encodeURIComponent(issueKey) });
+	const result = await get(connection, issuePath(issueKey, '/transitions'));
 	return result.transitions || [];
 }
 
 export async function createIssue(connection, fields) {
-	return getClient(connection).issues.createIssue({ fields });
+	return request(connection, '/rest/api/2/issue', {}, { method: 'POST', body: { fields } });
 }
 
 export async function editIssue(connection, issueKey, fields) {
-	await getClient(connection).issues.editIssue({ issueIdOrKey: encodeURIComponent(issueKey), fields });
+	await request(connection, issuePath(issueKey), {}, { method: 'PUT', body: { fields } });
 }
 
 export async function deleteIssue(connection, issueKey, deleteSubtasks = false) {
-	await getClient(connection).issues.deleteIssue({ issueIdOrKey: encodeURIComponent(issueKey), deleteSubtasks });
+	await request(connection, issuePath(issueKey), { deleteSubtasks: deleteSubtasks ? 'true' : undefined }, { method: 'DELETE' });
 }
 
 export async function transitionIssue(connection, issueKey, transitionId) {
-	await getClient(connection).issues.doTransition({
-		issueIdOrKey: encodeURIComponent(issueKey),
-		transition: { id: transitionId },
-	});
+	await request(connection, issuePath(issueKey, '/transitions'), {}, { method: 'POST', body: { transition: { id: transitionId } } });
 }
 
 export async function getComment(connection, issueKey, id) {
-	return getClient(connection).issueComments.getComment({ issueIdOrKey: encodeURIComponent(issueKey), id });
+	return get(connection, issuePath(issueKey, `/comment/${encodeURIComponent(id)}`));
 }
 
 export async function addComment(connection, issueKey, body) {
-	return getClient(connection).issueComments.addComment({ issueIdOrKey: encodeURIComponent(issueKey), comment: body });
+	return request(connection, issuePath(issueKey, '/comment'), {}, { method: 'POST', body: { body } });
 }
 
 export async function updateComment(connection, issueKey, id, body) {
-	return getClient(connection).issueComments.updateComment({ issueIdOrKey: encodeURIComponent(issueKey), id, comment: body });
+	return request(connection, issuePath(issueKey, `/comment/${encodeURIComponent(id)}`), {}, { method: 'PUT', body: { body } });
 }
 
 export async function deleteComment(connection, issueKey, id) {
-	await getClient(connection).issueComments.deleteComment({ issueIdOrKey: encodeURIComponent(issueKey), id });
+	await request(connection, issuePath(issueKey, `/comment/${encodeURIComponent(id)}`), {}, { method: 'DELETE' });
 }
 
 // The base URL and authentication that `dev api` sends raw read requests with.
 export function apiTarget(connection) {
 	return { base: new URL(connection.baseUrl), headers: { 'Authorization': authHeader(connection) } };
-}
-
-async function get(connection, path, params) {
-	return (await getClient(connection).instance.get(path, { params })).data;
-}
-
-function issuePath(issueKey, suffix = '') {
-	return `/rest/api/2/issue/${encodeURIComponent(issueKey)}${suffix}`;
 }
 
 // --- Worklogs ---
@@ -136,14 +124,14 @@ export async function getWorklog(connection, issueKey, id) {
 
 // `estimate` is { adjustEstimate, newEstimate, reduceBy } as the API takes them as query parameters.
 export async function addWorklog(connection, issueKey, { timeSpent, started, comment }, estimate = {}) {
-	const response = await getClient(connection).instance.post(issuePath(issueKey, '/worklog'), {
-		timeSpent, started, ...(comment && { comment }),
-	}, { params: estimate });
-	return response.data;
+	return request(connection, issuePath(issueKey, '/worklog'), estimate, {
+		method: 'POST',
+		body: { timeSpent, started, ...(comment && { comment }) },
+	});
 }
 
 export async function deleteWorklog(connection, issueKey, id, estimate = {}) {
-	await getClient(connection).instance.delete(issuePath(issueKey, `/worklog/${encodeURIComponent(id)}`), { params: estimate });
+	await request(connection, issuePath(issueKey, `/worklog/${encodeURIComponent(id)}`), estimate, { method: 'DELETE' });
 }
 
 export async function listQueues() {
@@ -195,16 +183,10 @@ export async function getIssueChildren(connection, issueKey) {
 	const parent = { key: issue.key, type, summary: issue.fields.summary };
 
 	if (type === 'Epic') {
-		const response = await getClient(connection).instance.get(
-			`/rest/agile/1.0/epic/${encodeURIComponent(issueKey)}/issue`,
-			{
-				params: {
-					fields: 'summary,status,assignee,priority,updated,issuetype',
-					maxResults: 100,
-				},
-			}
-		);
-		const data = response.data;
+		const data = await get(connection, `/rest/agile/1.0/epic/${encodeURIComponent(issueKey)}/issue`, {
+			fields: 'summary,status,assignee,priority,updated,issuetype',
+			maxResults: 100,
+		});
 		return {
 			issues: data.issues || [],
 			total: data.total ?? (data.issues || []).length,

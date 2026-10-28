@@ -17,13 +17,15 @@ export function apiErrorDetail(data) {
 	return text || undefined;
 }
 
-// Bitbucket and Confluence clients set `detail`; jira.js keeps the response body on the error.
+// The clients put the API's own messages in `detail`.
 function detailOf(err) {
-	return err.detail ?? apiErrorDetail(err.response?.data);
+	return err.detail;
 }
 
 export function handleError(err, context = '') {
 	const status = err.status ?? err.statusCode;
+	// fetch puts the network error code on its cause.
+	const code = err.code ?? err.cause?.code;
 	const detail = detailOf(err);
 
 	const report = (message) => {
@@ -59,8 +61,8 @@ export function handleError(err, context = '') {
 		return;
 	}
 
-	// fetch rejects with a TimeoutError from AbortSignal.timeout, axios (jira.js) with ECONNABORTED.
-	if (err.name === 'TimeoutError' || err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
+	// fetch rejects with a TimeoutError from AbortSignal.timeout.
+	if (err.name === 'TimeoutError' || code === 'ETIMEDOUT') {
 		error('The request timed out: the server did not answer in time.');
 		if (context) error(`Endpoint: ${context}`);
 		error('Check the base URL and your access, or allow more time with DEV_TIMEOUT=<seconds> (default 30).');
@@ -68,7 +70,7 @@ export function handleError(err, context = '') {
 		return;
 	}
 
-	if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
+	if (code === 'ECONNREFUSED' || code === 'ENOTFOUND') {
 		error(`Could not connect to server.`);
 		if (context) error(`URL: ${context}`);
 		error('Check that the URL is correct and the server is reachable.');
@@ -76,7 +78,7 @@ export function handleError(err, context = '') {
 		return;
 	}
 
-	if (err.code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' || err.code === 'SELF_SIGNED_CERT_IN_CHAIN') {
+	if (code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' || code === 'SELF_SIGNED_CERT_IN_CHAIN') {
 		error('SSL certificate error. If using a self-signed cert, set NODE_TLS_REJECT_UNAUTHORIZED=0');
 		process.exitCode = 1;
 		return;

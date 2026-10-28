@@ -78,7 +78,7 @@ Clients do not read config; commands pass the resolved connection in. Per-site c
 
 - **Bitbucket** (`clients/bitbucket.js`): Raw fetch against `api.bitbucket.org/2.0`, Basic auth, manual pagination via `next` links
 - **Jira** (`clients/jira.js`): `site(connection)` picks the client and value formats (`text`, `user`) for a `jira` or `serviceDesk` connection; the deployment comes from the `deployment` field, the host, the email, or `/rest/api/2/serverInfo`. Issue keys route to the connection whose `projects` or `defaultProject` lists them (`getConnection(types, ref, project)`); actions name the key with `route`.
-- **Jira Server/Data Center** (`clients/jiraServer.js`): `jira.js` SDK (Version2Client); Bearer for a personal access token, Basic when the connection has an email
+- **Jira Server/Data Center** (`clients/jiraServer.js`): REST v2 over fetch; Bearer for a personal access token, Basic when the connection has an email
 - **Jira Cloud** (`clients/jiraCloud.js`): REST v3 and the Service Desk API, Basic auth; comments are internal unless public
 - **Confluence** (`clients/confluence.js`): Cloud or Server/Data Center, detected per origin
 - **Service Desk** (`clients/serviceDesk.js`): the Jira Cloud client, with comments through the Service Desk API as before
