@@ -33,7 +33,7 @@ src/
   config/pending.js # Pending write actions awaiting approval, one JSON file each under <config dir>/pending
   clients/          # API clients; every exported function takes the connection object as its first argument
   actions/          # Write actions (prepare/summary/details/run/report); index.js is the registry by action name
-  commands/         # Commander subcommands (config, pr, jira, confluence, sd, pending); issueWrites.js adds the write commands shared by jira and sd
+  commands/         # Commander subcommands (config, pr, jira, confluence, sd, pending, api); issueWrites.js and issueFields.js add the write and `fields` commands shared by jira and sd
   formatters/       # Output formatting — each has three variants: rich (colored tables), plain (compact text), JSON (curated objects)
   utils/
     output.js       # Shared UI primitives: spinner, table (cli-table3), heading, field, divider, mask
@@ -42,12 +42,14 @@ src/
     connection.js   # connectionFor — resolves the --connection global flag for a command's type
     write.js        # runWrite — the gate every write command goes through; execute, text and --field helpers
     markup.js       # Conversions between plain text, ADF (Jira Cloud), and Confluence storage format
-    http.js         # jsonInit and apiError, shared by the fetch-based clients
+    http.js         # jsonInit, apiError, and the request timeout (DEV_TIMEOUT), shared by the clients
+    api.js          # `dev api`: path validation, the --select projection, pagination across API styles
+    jiraFields.js   # Jira field metadata, name resolution, schema-aware --field values, readable field values
 ```
 
 ### Writes
 
-Every write command calls `runWrite(cmd, action, buildInput)`. It refuses unless the connection has `allowWrite`; then `action.prepare` validates, resolves defaults, and reads what `run` needs (Confluence page version, transition ID). With `requireApproval` (the default) and no global `--approve`, `action.preview` reads display-only state (current comment text, PR head), the params are stored as a pending action with the connection's `writeTarget` site, and the command exits with status 2; `dev pending approve <id>` checks the site, runs `action.verify` (state that must not have changed, e.g. a PR head before merge), and then runs the stored params through `execute`, so what runs is exactly what was previewed. Summaries and details are derived from the stored params, never stored. Approval restores the pending action when the server answered with an error, and drops it when the outcome is unknown. A new write operation is a client function, an action registered through `actions/index.js`, and a command that calls `runWrite`.
+Every write command calls `runWrite(cmd, action, buildInput)`. It refuses unless the connection has `allowWrite`; then `action.prepare` validates, resolves defaults, and reads what `run` needs (Confluence page version, transition ID). With `requireApproval` (the default) and no global `--approve`, `action.preview` reads display-only state (current comment text, PR head), the params are stored as a pending action with the connection's `writeTarget` site, and the command exits with status 2; `dev pending approve <id>` checks the site, runs `action.verify` (state that must not have changed, e.g. a PR head before merge), and then runs the stored params through `execute`, so what runs is exactly what was previewed. Summaries and details are derived from the stored params, never stored. Approval restores the pending action when the server answered with an error, and drops it when the outcome is unknown. A new write operation is a client function, an action registered through `actions/index.js`, and a command that calls `runWrite`. `dev api` is read-only: it sends GET, and POST only to the `READ_ONLY_POST` endpoints in `commands/api.js`; each client's `apiTarget` supplies its base URL and auth header.
 
 ### Output Mode Pattern
 

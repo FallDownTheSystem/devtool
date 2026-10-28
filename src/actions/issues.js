@@ -1,11 +1,15 @@
 import { richText } from '../utils/markup.js';
+import {
+	metaList, findField, coerceFieldValue, parseLoose, missingRequired, missingMessage, siteFields,
+} from '../utils/jiraFields.js';
 import { requireText } from './require.js';
 
 // Builds the issue actions of a Jira dialect. Jira Server takes wiki-markup strings and user names;
 // Jira Cloud (Service Desk) takes ADF and account IDs. `dialect` supplies:
 //   prefix, type     action name prefix and connection type
 //   client           module with getIssue, getComment, getTransitions, createIssue, editIssue,
-//                    deleteIssue, transitionIssue, addComment, updateComment, deleteComment
+//                    deleteIssue, transitionIssue, addComment, updateComment, deleteComment,
+//                    getFields, getEditMeta, getCreateMeta
 //   text, user       map plain text and a user reference to API field values
 //   publicComments   whether a new comment can be customer-visible
 export function issueActions({ prefix, type, client, text, user, publicComments = false }) {
@@ -24,12 +28,35 @@ export function issueActions({ prefix, type, client, text, user, publicComments 
 	}
 
 	// A --field that repeats a dedicated option would silently replace it, and the summary and preview would
-	// then describe a request other than the one sent.
+	// then describe a request other than the one sent. Checked on the given names before any request and
+	// again on the resolved field IDs.
 	function rejectOverlap(params) {
 		const named = Object.keys(fields({ ...params, fields: {} }));
-		const overlap = Object.keys(params.fields || {}).filter((key) => named.includes(key));
+		const overlap = Object.keys(params.fields || {}).filter((key) => named.includes(key) || named.includes(key.toLowerCase()));
 		if (overlap.length) throw new Error(`--field ${overlap.join(', ')} repeats a dedicated option; use only one of them.`);
 		return params;
+	}
+
+	// Resolves each `--field` name (ID or display name) against the create or edit metadata and converts
+	// its text to the value the field's schema expects, so the preview shows what is sent.
+	async function resolveFields(connection, given, meta, where) {
+		const result = { fields: {}, fieldNames: {} };
+		for (const [ref, raw] of Object.entries(given)) {
+			const field = findField(meta, ref);
+			if (!field) {
+				const known = findField((await siteFields(connection, client)).map((f) => ({ id: f.id, name: f.name })), ref);
+				throw new Error(known
+					? `Field ${known.name} (${known.id}) is not on the ${where} screen, or you cannot set it.`
+					: `Unknown field "${ref}". Give a field ID or display name; \`fields\` lists the fields you can set.`);
+			}
+			result.fields[field.id] = coerceFieldValue(field, raw, { user });
+			if (field.name && field.name !== field.id) result.fieldNames[field.id] = field.name;
+		}
+		return result;
+	}
+
+	function looseFields(given) {
+		return { fields: Object.fromEntries(Object.entries(given).map(([key, raw]) => [key, parseLoose(raw)])), fieldNames: {} };
 	}
 
 	function fieldDetails(params) {
@@ -41,7 +68,10 @@ export function issueActions({ prefix, type, client, text, user, publicComments 
 		if (params.labels !== undefined) details.push(['Labels', params.labels.join(', ') || '(none)']);
 		if (params.assignee !== undefined) details.push(['Assignee', params.assignee ?? '(unassigned)']);
 		if (params.parent !== undefined) details.push(['Parent', params.parent]);
-		for (const [key, value] of Object.entries(params.fields || {})) details.push([key, JSON.stringify(value)]);
+		for (const [key, value] of Object.entries(params.fields || {})) {
+			const name = params.fieldNames?.[key];
+			details.push([name ? `${name} (${key})` : key, JSON.stringify(value)]);
+		}
 		if (params.description !== undefined) details.push(['Description', params.description || '(empty)']);
 		return details;
 	}
@@ -66,7 +96,18 @@ export function issueActions({ prefix, type, client, text, user, publicComments 
 			if (!project && !given.project) throw new Error('No project specified. Pass --project <key> or set defaultProject on the connection.');
 			if (!input.summary) throw new Error('A summary is required. Pass --summary <text>.');
 			const issueType = given.issuetype ? input.issueType : input.issueType || 'Task';
-			return rejectOverlap({ ...input, project, issueType });
+			rejectOverlap({ ...input, project, issueType });
+			// A project or issue type given by --field cannot be looked up, so those values are taken as given.
+			if (given.project || given.issuetype) return { ...input, project, issueType, ...looseFields(given) };
+			const { fields: meta } = await client.getCreateMeta(connection, project, { name: issueType });
+			const list = metaList(meta);
+			const resolved = await resolveFields(connection, given, list, 'create');
+			const params = rejectOverlap({ ...input, project, issueType, ...resolved });
+			const missing = missingRequired(list, fields(params));
+			if (missing.length) {
+				throw new Error(missingMessage(missing, `a ${issueType} in ${project}`, `\`fields --create --project ${project} --type "${issueType}"\``));
+			}
+			return params;
 		},
 		summary: (p) => `Create ${p.issueType ? `a ${p.issueType}` : 'an issue'} in ${p.project || 'the --field project'}: ${p.summary}`,
 		details: fieldDetails,
@@ -81,7 +122,11 @@ export function issueActions({ prefix, type, client, text, user, publicComments 
 			if (!Object.keys(fields(input)).length) {
 				throw new Error('Nothing to change. Pass at least one field option, such as --summary or --field.');
 			}
-			return rejectOverlap(input);
+			rejectOverlap(input);
+			const given = input.fields || {};
+			if (!Object.keys(given).length) return { ...input, fieldNames: {} };
+			const meta = metaList(await client.getEditMeta(connection, input.key));
+			return rejectOverlap({ ...input, ...await resolveFields(connection, given, meta, 'edit') });
 		},
 		preview: currentIssue,
 		summary: (p) => `Edit ${p.key}`,

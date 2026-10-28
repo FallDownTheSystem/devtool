@@ -17,8 +17,12 @@ const cli = fileURLToPath(new URL('../src/index.js', import.meta.url));
 
 // The CLI runs as a child process while this process serves the fake Jira, so it cannot block.
 function dev(...args) {
+	return devWith({}, ...args);
+}
+
+function devWith(env, ...args) {
 	return new Promise((resolve) => {
-		const child = spawn(process.execPath, [cli, ...args], { env: { ...process.env, NO_COLOR: '1' } });
+		const child = spawn(process.execPath, [cli, ...args], { env: { ...process.env, NO_COLOR: '1', ...env } });
 		let output = '';
 		child.stdout.on('data', (chunk) => { output += chunk; });
 		child.stderr.on('data', (chunk) => { output += chunk; });
@@ -38,7 +42,9 @@ before(async () => {
 		req.on('end', () => {
 			const entry = { method: req.method, path: req.url, auth: req.headers.authorization, body: body ? JSON.parse(body) : undefined };
 			requests.push(entry);
-			const [status, data] = respond(entry);
+			const answer = respond(entry);
+			if (answer === 'hang') return;
+			const [status, data] = answer;
 			res.writeHead(status, { 'content-type': 'application/json' });
 			res.end(data === undefined ? '' : JSON.stringify(data));
 		});
@@ -223,7 +229,10 @@ test('a transition is resolved by name before approval', async () => {
 
 test('issue edits send only the given fields', async () => {
 	jira({ allowWrite: true, requireApproval: false });
-	respond = (r) => r.method === 'GET' ? [200, { key: 'PROJ-1', fields: { summary: 'Old' } }] : [204];
+	respond = (r) => {
+		if (r.path.endsWith('/editmeta')) return [200, { fields: { customfield_1: { name: 'Choice', schema: { type: 'option' } } } }];
+		return r.method === 'GET' ? [200, { key: 'PROJ-1', fields: { summary: 'Old' } }] : [204];
+	};
 	const { status, output } = await dev('jira', 'edit', 'PROJ-1', '--summary', 'New', '--labels', 'a, b', '--unassign', '--field', 'customfield_1={"value":"x"}');
 	assert.equal(status, 0, output);
 	assert.deepEqual(writes()[0].body.fields, { summary: 'New', labels: ['a', 'b'], assignee: null, customfield_1: { value: 'x' } });
@@ -236,6 +245,109 @@ test('a --field that repeats a dedicated option is rejected', async () => {
 	assert.equal(status, 1);
 	assert.match(output, /--field summary repeats a dedicated option/);
 	assert.deepEqual(requests, []);
+});
+
+// A Jira 9 site whose Task create screen requires a plugin field.
+function createScreen(r) {
+	const path = r.path.split('?')[0];
+	if (path === '/rest/api/2/serverInfo') return [200, { versionNumbers: [9, 4, 0] }];
+	if (path === '/rest/api/2/issue/createmeta/PROJ/issuetypes') return [200, { startAt: 0, maxResults: 50, total: 1, values: [{ id: '3', name: 'Task' }] }];
+	if (path === '/rest/api/2/issue/createmeta/PROJ/issuetypes/3') {
+		return [200, { startAt: 0, maxResults: 50, total: 3, values: [
+			{ fieldId: 'summary', name: 'Summary', required: true, schema: { type: 'string' } },
+			{ fieldId: 'customfield_15300', name: 'Account', required: true, schema: { type: 'option2', custom: 'com.tempoplugin.tempo-accounts:accounts.customfield' } },
+			{ fieldId: 'customfield_2', name: 'Story Points', required: false, schema: { type: 'number' } },
+		] }];
+	}
+	if (path === '/rest/api/2/field') return [200, [{ id: 'customfield_77', name: 'Hidden' }]];
+	return [201, { id: '1', key: 'PROJ-9' }];
+}
+
+test('a --field given by display name is coerced by its schema, and the preview shows what is sent', async () => {
+	jira({ allowWrite: true });
+	respond = createScreen;
+	const held = await dev('jira', 'create', '--project', 'PROJ', '--summary', 'S', '--field', 'account=23533', '--field', 'Story Points=3', '--json');
+	assert.equal(held.status, 2, held.output);
+	const pending = JSON.parse(held.output);
+	assert.equal(pending.details['Account (customfield_15300)'], '"23533"');
+	assert.equal(pending.details['Story Points (customfield_2)'], '3');
+	assert.deepEqual(writes(), []);
+
+	assert.equal((await dev('pending', 'approve', pending.id)).status, 0);
+	assert.deepEqual(writes()[0].body.fields, {
+		project: { key: 'PROJ' }, issuetype: { name: 'Task' }, summary: 'S', customfield_15300: '23533', customfield_2: 3,
+	});
+});
+
+test('a create without a required field, or with a value that does not fit, fails before it is held', async () => {
+	jira({ allowWrite: true });
+	respond = createScreen;
+	const missing = await dev('jira', 'create', '--project', 'PROJ', '--summary', 'S');
+	assert.equal(missing.status, 1);
+	assert.match(missing.output, /Missing required field\(s\) for a Task in PROJ:\s+Account \(customfield_15300\): option2, com\.tempoplugin/);
+	const misfit = await dev('jira', 'create', '--project', 'PROJ', '--summary', 'S', '--field', 'Account=1', '--field', 'Story Points=many');
+	assert.equal(misfit.status, 1);
+	assert.match(misfit.output, /Story Points \(customfield_2\) has type number; "many" is not a number/);
+	const unknown = await dev('jira', 'create', '--project', 'PROJ', '--summary', 'S', '--field', 'Account=1', '--field', 'Nope=1');
+	assert.match(unknown.output, /Unknown field "Nope"/);
+	const hidden = await dev('jira', 'create', '--project', 'PROJ', '--summary', 'S', '--field', 'Account=1', '--field', 'hidden=1');
+	assert.match(hidden.output, /Field Hidden \(customfield_77\) is not on the create screen/);
+	assert.deepEqual(writes(), []);
+	assert.deepEqual(listPending(), []);
+});
+
+test('jira view shows standard fields when set and custom fields by display name', async () => {
+	jira();
+	respond = () => [200, {
+		key: 'PROJ-1',
+		names: { customfield_15300: 'Account' },
+		fields: {
+			summary: 'S', created: '2026-01-01', updated: '2026-01-02',
+			resolution: { name: 'Fixed' }, timetracking: { originalEstimate: '1d', remainingEstimate: '2h' },
+			customfield_15300: { id: 23533, key: 'ACC', name: 'Internal' },
+		},
+	}];
+	const { status, output } = await dev('jira', 'view', 'PROJ-1', '--fields', 'account', '--plain');
+	assert.equal(status, 0, output);
+	assert.match(output, /Resolution: Fixed/);
+	assert.match(output, /Time tracking: original 1d, remaining 2h/);
+	assert.doesNotMatch(output, /Due:/);
+	assert.match(output, /Account \(customfield_15300\): Internal \(ACC\)/);
+	const json = JSON.parse((await dev('jira', 'view', 'PROJ-1', '--all-fields', '--json')).output);
+	assert.deepEqual(json.fields.find((f) => f.id === 'customfield_15300').raw, { id: 23533, key: 'ACC', name: 'Internal' });
+	assert.equal(json.timeTracking.remainingEstimate, '2h');
+});
+
+test('dev api reads with the connection credentials and never prints them', async () => {
+	jira();
+	respond = () => [200, { name: 'me', startAt: 0, maxResults: 1, total: 2, values: [{ id: 1 }] }];
+	const read = await dev('api', 'jira', '/rest/api/2/myself', '--query', 'expand=groups', '--select', 'name');
+	assert.equal(read.status, 0, read.output);
+	assert.match(read.output, /^"me"$/m);
+	assert.match(read.output, /--all-pages/);
+	assert.deepEqual(requests.map((r) => [r.method, r.path, r.auth]), [['GET', '/rest/api/2/myself?expand=groups', 'Bearer jira-token']]);
+
+	respond = () => [401, { message: 'Unauthorized' }];
+	for (const args of [['/rest/api/2/myself'], ['/rest/api/2/myself', '--json'], ['https://evil.example.invalid/x'], ['/rest/../x']]) {
+		const { status, output } = await dev('api', 'jira', ...args);
+		assert.equal(status, 1, output);
+		assert.doesNotMatch(output, /jira-token|Bearer|Authorization/i);
+	}
+	assert.equal(requests.length, 3);
+	assert.match((await dev('api', 'jira', '/rest/api/2/issue', '--post', '{}')).output, /--post is allowed only for read-only POST endpoints/);
+	assert.equal(requests.length, 3);
+});
+
+test('a stalled request fails with a timeout instead of hanging', async () => {
+	jira();
+	respond = () => 'hang';
+	const started = Date.now();
+	const { status, output } = await devWith({ DEV_TIMEOUT: '1' }, 'api', 'jira', '/rest/api/2/myself');
+	assert.equal(status, 1);
+	assert.match(output, /timed out/);
+	assert.ok(Date.now() - started < 10000);
+	const viaSdk = await devWith({ DEV_TIMEOUT: '1' }, 'jira', 'view', 'PROJ-1');
+	assert.match(viaSdk.output, /timed out/);
 });
 
 test('a held comment edit previews the current text read by ID', async () => {

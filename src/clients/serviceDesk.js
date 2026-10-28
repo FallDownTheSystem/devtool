@@ -1,4 +1,5 @@
 import { jsonInit, apiError } from '../utils/http.js';
+import { collectPages, pickIssueType } from '../utils/jiraFields.js';
 
 function configurationError(reason) {
 	return new Error(`Service Desk configuration error: ${reason}. Check the base URL of the Service Desk connection; use the canonical https://<site>.atlassian.net URL.`);
@@ -22,7 +23,7 @@ function authHeader({ email = '', token = '' }) {
 }
 
 // Only a write that documents an empty response may receive one; any other empty answer is a misconfiguration.
-async function fetchJson(url, headers = {}, { method, body, allowEmpty = false } = {}) {
+async function fetchJson(url, headers = {}, { method, body, allowEmpty = false, allowArray = false } = {}) {
 	const res = await fetch(url, { ...jsonInit({ method, body, headers }), redirect: 'manual' });
 
 	if (res.redirected || (res.status >= 300 && res.status < 400)) {
@@ -44,13 +45,15 @@ async function fetchJson(url, headers = {}, { method, body, allowEmpty = false }
 	} catch {
 		throw configurationError('the API response contains invalid JSON');
 	}
-	if (!data || typeof data !== 'object' || Array.isArray(data)) {
+	if (!data || typeof data !== 'object' || (Array.isArray(data) && !allowArray)) {
 		throw configurationError('unexpected API response structure');
 	}
 	return data;
 }
 
-async function request(connection, path, params = {}, { extraHeaders = {}, validate = () => true, method, body, allowEmpty } = {}) {
+// A site that is not *.atlassian.net must name itself as its canonical base URL, so credentials are
+// sent only to the site the connection points to.
+async function verifiedSite(connection) {
 	const site = baseUrl(connection);
 	if (!site.hostname.endsWith('.atlassian.net')) {
 		const info = await fetchJson(new URL('/rest/api/2/serverInfo', site));
@@ -64,12 +67,21 @@ async function request(connection, path, params = {}, { extraHeaders = {}, valid
 			throw configurationError(`serverInfo identifies a different canonical base URL: ${canonical.origin}${canonical.pathname.replace(/\/+$/, '')}`);
 		}
 	}
+	return site;
+}
 
+// The base URL and authentication that `dev api` sends raw read requests with.
+export async function apiTarget(connection) {
+	return { base: await verifiedSite(connection), headers: { 'Authorization': authHeader(connection) } };
+}
+
+async function request(connection, path, params = {}, { extraHeaders = {}, validate = () => true, method, body, allowEmpty, allowArray } = {}) {
+	const site = await verifiedSite(connection);
 	const url = new URL(path, site);
 	for (const [k, v] of Object.entries(params)) {
 		if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
 	}
-	const data = await fetchJson(url, { 'Authorization': authHeader(connection), ...extraHeaders }, { method, body, allowEmpty });
+	const data = await fetchJson(url, { 'Authorization': authHeader(connection), ...extraHeaders }, { method, body, allowEmpty, allowArray });
 	if (data !== null && !validate(data)) throw configurationError('unexpected API response structure');
 	return data;
 }
@@ -80,7 +92,7 @@ function issuePath(issueKey, suffix = '') {
 
 export async function getIssue(connection, issueKey) {
 	return request(connection, issuePath(issueKey), {
-		expand: 'renderedFields',
+		expand: 'renderedFields,names',
 	}, {
 		validate: (data) => typeof data.key === 'string' && data.fields && typeof data.fields === 'object' && !Array.isArray(data.fields),
 	});
@@ -240,4 +252,21 @@ export async function deleteComment(connection, issueKey, id) {
 		method: 'DELETE',
 		allowEmpty: true,
 	});
+}
+
+export async function getFields(connection) {
+	return request(connection, '/rest/api/3/field', {}, { allowArray: true, validate: Array.isArray });
+}
+
+export async function getEditMeta(connection, issueKey) {
+	return (await request(connection, issuePath(issueKey, '/editmeta'))).fields || {};
+}
+
+// Jira Cloud has only the paged per-project, per-type createmeta endpoints. `issueType` is { id } or { name }.
+export async function getCreateMeta(connection, project, issueType) {
+	const base = `/rest/api/3/issue/createmeta/${encodeURIComponent(project)}/issuetypes`;
+	const types = await collectPages((startAt) => request(connection, base, { startAt }), (data) => data.issueTypes);
+	const type = pickIssueType(types, issueType, project);
+	const fields = await collectPages((startAt) => request(connection, `${base}/${encodeURIComponent(type.id)}`, { startAt }), (data) => data.fields);
+	return { issueType: type, fields };
 }

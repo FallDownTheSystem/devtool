@@ -1,4 +1,4 @@
-import { jsonInit, apiError } from '../utils/http.js';
+import { jsonInit, apiError, timeoutSignal } from '../utils/http.js';
 
 const deployments = new Map();
 
@@ -9,6 +9,7 @@ async function detectDeployment(origin) {
 	try {
 		const res = await fetch(new URL('/_edge/tenant_info', origin), {
 			headers: { 'Accept': 'application/json' },
+			signal: timeoutSignal(),
 		});
 		if (res.ok && (await res.json()).cloudId) return 'cloud';
 	} catch {
@@ -24,6 +25,13 @@ async function connect({ baseUrl, email, token }) {
 	// Cloud always serves Confluence under /wiki; Server/Data Center keeps its own context path.
 	const path = kind === 'cloud' ? '/wiki' : base.pathname.replace(/\/+$/, '');
 	return { kind, origin: base.origin, path, email, token };
+}
+
+// The base URL and authentication that `dev api` sends raw read requests with: the context path on
+// Server/Data Center, /wiki on Cloud.
+export async function apiTarget(connection) {
+	const conn = await connect(connection);
+	return { base: new URL(`${conn.origin}${conn.path}`), headers: { 'Authorization': authHeader(conn) } };
 }
 
 function apiUrl(conn, path) {
@@ -99,8 +107,14 @@ function serverPage(page) {
 		status: page.status,
 		spaceId: page.space?.id != null ? String(page.space.id) : undefined,
 		createdAt: page.history?.createdDate,
-		version: page.version ? { number: page.version.number } : undefined,
+		version: page.version ? {
+			number: page.version.number,
+			...(page.version.by && { author: page.version.by.displayName || page.version.by.username }),
+			...(page.version.when && { createdAt: page.version.when }),
+		} : undefined,
 		body: page.body,
+		...(page.metadata?.labels && { labels: (page.metadata.labels.results || []).map((l) => l.name) }),
+		...(page.ancestors && { ancestors: page.ancestors.map((a) => ({ id: String(a.id), title: a.title })) }),
 	};
 }
 
@@ -124,13 +138,53 @@ export async function listSpaces(connection) {
 	return spaces(await connect(connection));
 }
 
-export async function getPage(connection, id) {
+// Cloud v2 names the version author by account ID only; ancestors come as IDs, so their titles are read
+// in one more request.
+async function cloudPageDetails(conn, page) {
+	const ancestorIds = (await paginate(conn, `/api/v2/pages/${page.id}/ancestors`)).map((a) => String(a.id));
+	const titles = new Map();
+	if (ancestorIds.length) {
+		const found = await request(conn, apiUrl(conn, '/api/v2/pages'), { id: ancestorIds.join(','), limit: 250 });
+		for (const p of found.results || []) titles.set(String(p.id), p.title);
+	}
+	return {
+		...page,
+		version: page.version && { ...page.version, author: page.version.authorId },
+		labels: (page.labels?.results || []).map((l) => l.name),
+		ancestors: ancestorIds.map((ancestor) => ({ id: ancestor, title: titles.get(ancestor) ?? null })),
+	};
+}
+
+// With `details`, the page also carries its labels, ancestors (root first), and version author and date.
+export async function getPage(connection, id, { details = false } = {}) {
 	const conn = await connect(connection);
 	if (conn.kind === 'cloud') {
-		return request(conn, apiUrl(conn, `/api/v2/pages/${id}`), { 'body-format': 'storage' });
+		const page = await request(conn, apiUrl(conn, `/api/v2/pages/${id}`), {
+			'body-format': 'storage',
+			...(details && { 'include-labels': 'true', 'include-version': 'true' }),
+		});
+		return details ? cloudPageDetails(conn, page) : page;
 	}
 	return serverPage(await request(conn, apiUrl(conn, `/rest/api/content/${id}`), {
-		expand: 'body.storage,version,space,history',
+		expand: `body.storage,version,space,history${details ? ',ancestors,metadata.labels' : ''}`,
+	}));
+}
+
+export async function listChildPages(connection, id) {
+	const conn = await connect(connection);
+	if (conn.kind === 'cloud') return paginate(conn, `/api/v2/pages/${id}/children`);
+	return (await paginate(conn, `/rest/api/content/${id}/child/page`, { expand: 'version,history', limit: 100 })).map(serverPage);
+}
+
+export async function listAttachments(connection, pageId) {
+	const conn = await connect(connection);
+	if (conn.kind === 'cloud') {
+		return (await paginate(conn, `/api/v2/pages/${pageId}/attachments`)).map((a) => ({
+			id: a.id, title: a.title, fileSize: a.fileSize ?? null, mediaType: a.mediaType || null,
+		}));
+	}
+	return (await paginate(conn, `/rest/api/content/${pageId}/child/attachment`, { limit: 100 })).map((a) => ({
+		id: a.id, title: a.title, fileSize: a.extensions?.fileSize ?? null, mediaType: a.extensions?.mediaType || a.metadata?.mediaType || null,
 	}));
 }
 

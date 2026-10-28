@@ -5,11 +5,14 @@ import {
 	listSpacePages,
 	searchPages,
 	listPageComments,
+	listChildPages,
+	listAttachments,
 } from '../clients/confluence.js';
 import {
 	formatSpaces, formatPageView, formatPages, formatSearch, formatComments,
 	plainSpaces, plainPageView, plainPages, plainSearch, plainComments,
 	curateSpacesJson, curatePageJson, curatePagesJson, curateSearchJson, curateCommentsJson,
+	formatAttachments, plainAttachments, curateAttachmentsJson,
 } from '../formatters/confluence.js';
 import * as actions from '../actions/confluence.js';
 import { runWrite, readText, FILE_HELP } from '../utils/write.js';
@@ -43,14 +46,18 @@ confluence.command('view <id>')
 	.alias('read')
 	.description('View a page')
 	.option('--storage', 'Show the body in storage format (XHTML), the format that edit takes')
+	.option('--children', 'Also list the child pages')
 	.action(async function (id, opts) {
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner(`Fetching page ${id}...`).start() : null;
 		try {
-			const page = await getPage(connectionFor(this, 'confluence'), id);
+			const connection = connectionFor(this, 'confluence');
+			const page = await getPage(connection, id, { details: true });
+			if (opts.children) page.children = (await listChildPages(connection, id)).map((c) => ({ id: String(c.id), title: c.title }));
 			if (s) s.success({ text: page.title || `Page ${id}` });
 			const storage = page.body?.storage?.value || '';
-			if (mode === 'json') outputJson(opts.storage ? { ...curatePageJson(page), body: storage } : curatePageJson(page));
+			const json = { ...curatePageJson(page), ...(page.children && { children: page.children }) };
+			if (mode === 'json') outputJson(opts.storage ? { ...json, body: storage } : json);
 			else if (opts.storage) console.log(storage);
 			else if (mode === 'plain') plainPageView(page);
 			else formatPageView(page);
@@ -126,6 +133,23 @@ confluence.command('comments <pageId>')
 			else formatComments(comments);
 		} catch (err) {
 			if (s) s.error({ text: `Failed to fetch comments for page ${pageId}` });
+			handleError(err, err.url || 'confluence');
+		}
+	});
+
+confluence.command('attachments <pageId>')
+	.description('List the attachments of a page (name, size, media type, ID)')
+	.action(async function (pageId) {
+		const mode = getOutputMode(this);
+		const s = mode === 'rich' ? spinner(`Fetching attachments for page ${pageId}...`).start() : null;
+		try {
+			const attachments = await listAttachments(connectionFor(this, 'confluence'), pageId);
+			if (s) s.success({ text: `${attachments.length} attachment(s)` });
+			if (mode === 'json') outputJson(curateAttachmentsJson(attachments));
+			else if (mode === 'plain') plainAttachments(attachments);
+			else formatAttachments(attachments);
+		} catch (err) {
+			if (s) s.error({ text: `Failed to fetch attachments for page ${pageId}` });
 			handleError(err, err.url || 'confluence');
 		}
 	});

@@ -8,6 +8,8 @@ import {
 } from '../clients/jira.js';
 import actions, { dialect } from '../actions/jira.js';
 import { addIssueWriteCommands } from './issueWrites.js';
+import { addIssueFieldsCommand, VIEW_FIELDS_HELP, VIEW_ALL_FIELDS_HELP } from './issueFields.js';
+import { requestedFields } from '../utils/jiraFields.js';
 import {
 	formatIssueView, formatIssueComments, formatIssueSearch,
 	plainIssueView, plainIssueComments, plainIssueSearch,
@@ -25,15 +27,18 @@ const jira = new Command('jira')
 jira.command('view <key>')
 	.alias('read')
 	.description('View issue details')
-	.action(async function (key) {
+	.option('--fields <list>', VIEW_FIELDS_HELP)
+	.option('--all-fields', VIEW_ALL_FIELDS_HELP)
+	.action(async function (key, opts) {
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner(`Fetching ${key}...`).start() : null;
 		try {
 			const issue = await getIssue(connectionFor(this, 'jira'), key);
+			const extra = requestedFields(issue, opts);
 			if (s) s.success({ text: key });
-			if (mode === 'json') outputJson(curateIssueJson(issue));
-			else if (mode === 'plain') plainIssueView(issue);
-			else formatIssueView(issue);
+			if (mode === 'json') outputJson(curateIssueJson(issue, extra));
+			else if (mode === 'plain') plainIssueView(issue, extra);
+			else formatIssueView(issue, extra);
 		} catch (err) {
 			if (s) s.error({ text: `Failed to fetch ${key}` });
 			handleError(err, `jira issue ${key}`);
@@ -121,5 +126,7 @@ addIssueWriteCommands(jira, {
 	noun: 'an issue',
 	userHelp: 'Assignee user name',
 });
+
+addIssueFieldsCommand(jira, { dialect, noun: 'an issue' });
 
 export default jira;

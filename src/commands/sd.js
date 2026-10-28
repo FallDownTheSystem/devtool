@@ -9,6 +9,8 @@ import {
 } from '../clients/serviceDesk.js';
 import actions, { dialect } from '../actions/serviceDesk.js';
 import { addIssueWriteCommands } from './issueWrites.js';
+import { addIssueFieldsCommand, VIEW_FIELDS_HELP, VIEW_ALL_FIELDS_HELP } from './issueFields.js';
+import { requestedFields } from '../utils/jiraFields.js';
 import {
 	formatIssueView, formatIssueComments, formatIssueSearch,
 	plainIssueView, plainIssueComments, plainIssueSearch,
@@ -27,15 +29,18 @@ const sd = new Command('sd')
 sd.command('view <key>')
 	.alias('read')
 	.description('View ticket details')
-	.action(async function (key) {
+	.option('--fields <list>', VIEW_FIELDS_HELP)
+	.option('--all-fields', VIEW_ALL_FIELDS_HELP)
+	.action(async function (key, opts) {
 		const mode = getOutputMode(this);
 		const s = mode === 'rich' ? spinner(`Fetching ${key}...`).start() : null;
 		try {
 			const issue = await getIssue(connectionFor(this, 'serviceDesk'), key);
+			const extra = requestedFields(issue, opts);
 			if (s) s.success({ text: key });
-			if (mode === 'json') outputJson(curateIssueJson(issue));
-			else if (mode === 'plain') plainIssueView(issue);
-			else formatIssueView(issue);
+			if (mode === 'json') outputJson(curateIssueJson(issue, extra));
+			else if (mode === 'plain') plainIssueView(issue, extra);
+			else formatIssueView(issue, extra);
 		} catch (err) {
 			if (s) s.error({ text: `Failed to fetch ${key}` });
 			handleError(err, `sd view ${key}`);
@@ -141,5 +146,7 @@ addIssueWriteCommands(sd, {
 	noun: 'a ticket',
 	userHelp: 'Assignee account ID',
 });
+
+addIssueFieldsCommand(sd, { dialect, noun: 'a ticket' });
 
 export default sd;

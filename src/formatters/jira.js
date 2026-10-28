@@ -1,4 +1,6 @@
 import { table, heading, field, divider, pc } from '../utils/output.js';
+import { standardJson } from '../utils/jiraFields.js';
+import { plainExtras, richExtras } from './issueFields.js';
 
 function statusColor(name) {
 	if (!name) return pc.dim('Unknown');
@@ -67,7 +69,8 @@ function descriptionText(desc) {
 
 // --- JSON curators ---
 
-export function curateIssueJson(issue) {
+// `extra` is the result of requestedFields: the fields asked for with --fields or --all-fields.
+export function curateIssueJson(issue, extra) {
 	const f = issue.fields;
 	return {
 		key: issue.key,
@@ -84,6 +87,8 @@ export function curateIssueJson(issue) {
 		created: f.created,
 		updated: f.updated,
 		description: descriptionText(f.description),
+		...standardJson(f),
+		...(extra && { fields: extra }),
 	};
 }
 
@@ -129,7 +134,7 @@ export function curateChildrenJson(result) {
 
 // --- Plain formatters ---
 
-export function plainIssueView(issue) {
+export function plainIssueView(issue, extra) {
 	const f = issue.fields;
 	console.log(`${issue.key} ${f.summary}`);
 	console.log(`Status: ${f.status?.name || 'Unknown'}`);
@@ -143,6 +148,7 @@ export function plainIssueView(issue) {
 	if (sprint) console.log(`Sprint: ${sprint}`);
 	const points = extractStoryPoints(f);
 	if (points) console.log(`Story Points: ${points}`);
+	plainExtras(f, extra);
 	console.log(`Created: ${f.created}`);
 	console.log(`Updated: ${f.updated}`);
 	const desc = descriptionText(f.description);
@@ -190,7 +196,7 @@ export function plainIssueChildren(result) {
 
 // --- Rich formatters (original) ---
 
-export function formatIssueView(issue) {
+export function formatIssueView(issue, extra) {
 	const f = issue.fields;
 
 	heading(`${issue.key} ${f.summary}`);
@@ -209,6 +215,7 @@ export function formatIssueView(issue) {
 	const points = extractStoryPoints(f);
 	if (points) field('Story Points', points);
 
+	richExtras(f, extra);
 	field('Created', new Date(f.created).toLocaleString());
 	field('Updated', new Date(f.updated).toLocaleString());
 

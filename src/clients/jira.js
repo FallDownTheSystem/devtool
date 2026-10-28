@@ -1,4 +1,6 @@
 import { Version2Client } from 'jira.js';
+import { requestTimeout } from '../utils/http.js';
+import { collectPages, pickIssueType } from '../utils/jiraFields.js';
 
 const clients = new Map();
 
@@ -10,6 +12,7 @@ function getClient({ baseUrl, token }) {
 			authentication: {
 				basic: { email: '', apiToken: token },
 			},
+			baseRequestConfig: { timeout: requestTimeout() },
 		});
 		client.instance.interceptors.request.use((config) => {
 			config.headers['Authorization'] = `Bearer ${token}`;
@@ -24,7 +27,7 @@ export async function getIssue(connection, issueKey) {
 	return getClient(connection).issues.getIssue({
 		issueIdOrKey: issueKey,
 		fields: ['*all'],
-		expand: 'renderedFields',
+		expand: 'renderedFields,names',
 	});
 }
 
@@ -98,6 +101,52 @@ export async function updateComment(connection, issueKey, id, body) {
 
 export async function deleteComment(connection, issueKey, id) {
 	await getClient(connection).issueComments.deleteComment({ issueIdOrKey: encodeURIComponent(issueKey), id });
+}
+
+// The base URL and authentication that `dev api` sends raw read requests with.
+export function apiTarget({ baseUrl, token }) {
+	return { base: new URL(baseUrl), headers: { 'Authorization': `Bearer ${token}` } };
+}
+
+async function get(connection, path, params) {
+	return (await getClient(connection).instance.get(path, { params })).data;
+}
+
+export async function getFields(connection) {
+	return get(connection, '/rest/api/2/field');
+}
+
+export async function getEditMeta(connection, issueKey) {
+	return (await get(connection, `/rest/api/2/issue/${encodeURIComponent(issueKey)}/editmeta`)).fields || {};
+}
+
+const versions = new Map();
+
+async function majorVersion(connection) {
+	if (!versions.has(connection.baseUrl)) {
+		versions.set(connection.baseUrl, get(connection, '/rest/api/2/serverInfo').then((info) => info.versionNumbers?.[0] ?? parseInt(info.version, 10)));
+	}
+	return versions.get(connection.baseUrl);
+}
+
+// Jira 9 removed the expand form of createmeta in favor of paged per-project, per-type endpoints;
+// earlier versions have only the expand form. `issueType` is { id } or { name }.
+export async function getCreateMeta(connection, project, issueType) {
+	const base = `/rest/api/2/issue/createmeta/${encodeURIComponent(project)}/issuetypes`;
+	if (await majorVersion(connection) >= 9) {
+		const types = await collectPages((startAt) => get(connection, base, { startAt }), (data) => data.values);
+		const type = pickIssueType(types, issueType, project);
+		const fields = await collectPages((startAt) => get(connection, `${base}/${encodeURIComponent(type.id)}`, { startAt }), (data) => data.values);
+		return { issueType: type, fields };
+	}
+	const data = await get(connection, '/rest/api/2/issue/createmeta', {
+		[/^\d+$/.test(project) ? 'projectIds' : 'projectKeys']: project,
+		expand: 'projects.issuetypes.fields',
+	});
+	const found = data.projects?.[0];
+	if (!found) throw new Error(`Project ${project} was not found, or you cannot create issues in it.`);
+	const type = pickIssueType(found.issuetypes || [], issueType, project);
+	return { issueType: type, fields: type.fields || {} };
 }
 
 export async function getIssueChildren(connection, issueKey) {

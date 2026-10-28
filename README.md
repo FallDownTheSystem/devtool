@@ -19,14 +19,20 @@ dev pr comments 42           # review comments
 dev pr diff 42               # changed files
 dev pr activity 42           # approvals, updates, comments
 
-dev jira view PROJ-123       # ticket details
+dev jira view PROJ-123       # ticket details, with resolution, time tracking, versions, due date, parent
+dev jira view PROJ-123 --fields Account,"Story Points"   # extra fields by ID or display name
+dev jira view PROJ-123 --all-fields                    # every non-empty field (--json adds raw values)
+dev jira fields PROJ-123     # fields an edit can set: type, required, allowed values
+dev jira fields --create --project PROJ --type Bug     # fields a new issue takes; required first
 dev jira comments PROJ-123   # ticket comments
 dev jira search "sprint = 5" # JQL search
 dev jira children PROJ-123   # epic children or subtasks (auto-detect)
 dev jira mine                # your open tickets
 
 dev confluence spaces        # list spaces
-dev confluence view 12345    # read a page
+dev confluence view 12345    # read a page, with labels, ancestors, and the version author and date
+dev confluence view 12345 --children   # also list child pages
+dev confluence attachments 12345       # attachment names, sizes, media types, IDs
 dev confluence pages         # pages in a space
 dev confluence search "auth" # CQL search
 
@@ -39,7 +45,30 @@ dev config show              # all connections (tokens masked)
 dev config set <key> <value> # set a single field, e.g. work.baseUrl
 ```
 
-Most commands have short aliases: `ls`, `read`, `find`, `my`.
+Most commands have short aliases: `ls`, `read`, `find`, `my`. `dev sd` has the same `view` options and `fields` command as `dev jira`.
+
+### Raw reads: `dev api`
+
+`dev api` reads any REST endpoint of a configured connection that the other commands do not cover. The CLI adds the connection's base URL and credentials; it never prints them.
+
+```bash
+dev api jira /rest/api/2/issue/PROJ-1/editmeta
+dev api jira /rest/api/2/issue/PROJ-1 --query fields=customfield_15300,timetracking,resolution
+dev api serviceDesk /rest/api/3/field --select '[].{id,name,schema}'
+dev api confluence /rest/api/content/123 --query expand=version,ancestors,metadata.labels
+dev api bitbucket /repositories/my-workspace/my-repo/pullrequests --query state=MERGED --all-pages
+```
+
+- `<connection>` is a connection name, or a type for its default connection, as with `--connection`.
+- `<path>` is relative to the connection's base URL: the site for Jira and Service Desk, `/wiki` on Confluence Cloud or the context path on Server/Data Center, and `https://api.bitbucket.org/2.0` for Bitbucket. Absolute and scheme-relative URLs, `.`/`..` segments (also percent-encoded), and backslashes are rejected, and redirects are not followed, so credentials only go to the connection's own site.
+- **Read-only.** Requests are GET. `--post '<json>'` is accepted only for a short list of POST endpoints that only read (JQL search: Jira `/rest/api/2/search`, Jira Cloud `/rest/api/3/search/jql` and `/rest/api/3/search/approximate-count`). Writes go through the write commands and their approval flow.
+- Output is JSON, indented by default and compact with `--plain` or `--json`. `--raw` prints the body unchanged; non-JSON bodies print as text.
+- `--select` projects the JSON: dot paths (`issues.0.key`), `[]` for each item of an array or each value of an object (`issues[].key`), and `{a,b.c}` to pick keys (`issues[].{key,fields.summary}`; keys are named by the path as written).
+- `--all-pages` follows `startAt`/`maxResults`/`total` (Jira), `nextPageToken`/`isLast` (Jira Cloud), `_links.next` (Confluence, Service Desk API), and `next` (Bitbucket), up to `--limit` items (default 1,000). Without it, one page is returned and standard error shows how to get the next.
+
+### Timeouts
+
+Every API request gives up after 30 seconds with a timeout error instead of hanging. Set `DEV_TIMEOUT=<seconds>` to change it.
 
 ### Output modes
 
@@ -158,7 +187,9 @@ dev confluence comment add 12345 "Looks good" --text
 dev confluence comment delete <commentId>
 ```
 
-Jira Server takes wiki markup and user names; Service Desk (Jira Cloud) takes plain text, which is converted to paragraphs, and account IDs for `--assignee`. `--field` values are parsed as JSON when valid, so `--field 'customfield_1={"value":"High"}'` sets an option field.
+Jira Server takes wiki markup and user names; Service Desk (Jira Cloud) takes plain text, which is converted to paragraphs, and account IDs for `--assignee`.
+
+`--field <name>=<value>` takes a field ID or display name (`--field Account=23533`, `--field "Story Points=5"`). Before anything is held or sent, the field is looked up in the create metadata (create) or edit metadata (edit) and the value is converted to what its schema expects: text and plugin fields get a string, numbers a number, option and select fields `{"id": ...}` for an allowed value (matched by value, name, or ID) or `{"value": ...}`, user fields the user reference of the site, and array fields a comma-separated list. JSON (`{...}`, `[...]`, a quoted `"..."`, or `null`) is sent unchanged, e.g. `--field 'customfield_1={"value":"High"}'`. A value that does not fit, a field that is not on the screen, or a required field missing on create fails with the field's name, type, and some allowed values. The approval preview shows each field as `Name (id)` with the value that is sent. `dev jira fields` lists the fields and their types.
 
 ## Config
 

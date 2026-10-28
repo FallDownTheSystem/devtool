@@ -2,7 +2,7 @@ import { table, spinner } from '../utils/output.js';
 import { handleError } from '../utils/errors.js';
 import { getOutputMode, outputJson } from '../utils/mode.js';
 import { connectionFor } from '../utils/connection.js';
-import { runWrite, readText, collect, parseFields, FILE_HELP } from '../utils/write.js';
+import { runWrite, readText, collect, parseFieldArgs, FILE_HELP } from '../utils/write.js';
 
 function issueOptions(command, { userHelp }) {
 	return command
@@ -13,11 +13,11 @@ function issueOptions(command, { userHelp }) {
 		.option('--labels <list>', 'Comma-separated labels; replaces the current labels')
 		.option('--assignee <user>', userHelp)
 		.option('--parent <key>', 'Parent issue key')
-		.option('--field <field=value>', 'Set any field by ID, e.g. customfield_10010=5; the value is parsed as JSON when valid (repeatable)', collect, []);
+		.option('--field <field=value>', 'Set any field by ID or display name, e.g. Account=23533. The value is converted to the type the field expects; JSON ({...}, [...], "...") is sent unchanged (repeatable)', collect, []);
 }
 
 function issueInput(opts) {
-	const input = { fields: parseFields(opts.field) };
+	const input = { fields: parseFieldArgs(opts.field) };
 	const description = readText(opts.description, opts.descriptionFile, '--description-file');
 	if (opts.summary !== undefined) input.summary = opts.summary;
 	if (description !== undefined) input.description = description;

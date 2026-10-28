@@ -54,20 +54,14 @@ export function collect(value, previous = []) {
 	return [...previous, value];
 }
 
-// `--field name=value` sets any API field; the value is JSON when it parses, so objects and numbers work.
-export function parseFields(entries = []) {
+// `--field name=value` sets any API field by ID or display name. The value stays text here; the action
+// converts it with the field's schema.
+export function parseFieldArgs(entries = []) {
 	const fields = {};
 	for (const entry of entries) {
 		const eq = entry.indexOf('=');
-		if (eq <= 0) throw new Error(`Invalid --field "${entry}". Use <field>=<value>, e.g. customfield_10010=5.`);
-		const raw = entry.slice(eq + 1);
-		let value;
-		try {
-			value = JSON.parse(raw);
-		} catch {
-			value = raw;
-		}
-		fields[entry.slice(0, eq)] = value;
+		if (eq <= 0) throw new Error(`Invalid --field "${entry}". Use <field>=<value>, e.g. customfield_10010=5 or "Story Points=5".`);
+		fields[entry.slice(0, eq).trim()] = entry.slice(eq + 1);
 	}
 	return fields;
 }

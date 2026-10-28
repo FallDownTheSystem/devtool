@@ -6,6 +6,11 @@ function authHeader(connection) {
 	return 'Basic ' + Buffer.from(`${connection.email}:${connection.token}`).toString('base64');
 }
 
+// The base URL and authentication that `dev api` sends raw read requests with.
+export function apiTarget(connection) {
+	return { base: new URL(BASE_URL), headers: { 'Authorization': authHeader(connection) } };
+}
+
 export function resolveRepo(connection, repoOverride) {
 	const repo = repoOverride || connection.defaultRepo;
 	if (!repo) throw new Error('No repository specified. Pass --repo <slug> or set defaultRepo on the Bitbucket connection.');

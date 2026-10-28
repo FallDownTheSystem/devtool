@@ -40,8 +40,43 @@ export function curatePageJson(page) {
 		status: page.status || null,
 		createdAt: page.createdAt || null,
 		version: page.version?.number || null,
+		versionAuthor: page.version?.author || null,
+		versionDate: page.version?.createdAt || null,
+		labels: page.labels || [],
+		ancestors: page.ancestors || [],
 		body: storageToText(page.body?.storage?.value),
 	};
+}
+
+export function curateAttachmentsJson(attachments) {
+	return attachments.map((a) => ({ id: a.id, title: a.title, fileSize: a.fileSize, mediaType: a.mediaType }));
+}
+
+function sizeText(bytes) {
+	if (bytes == null) return '';
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+	return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+export function plainAttachments(attachments) {
+	if (attachments.length === 0) { console.log('No attachments.'); return; }
+	for (const a of attachments) console.log(`${a.id} "${a.title}" ${sizeText(a.fileSize)} ${a.mediaType || ''}`.trimEnd());
+}
+
+export function formatAttachments(attachments) {
+	if (attachments.length === 0) { console.log(pc.dim('  No attachments.')); return; }
+	console.log(table(['ID', 'Name', 'Size', 'Media type'], attachments.map((a) => [a.id, a.title, sizeText(a.fileSize), a.mediaType || ''])));
+}
+
+function breadcrumb(page) {
+	return (page.ancestors || []).map((a) => a.title || a.id).join(' › ');
+}
+
+function versionText(page) {
+	const v = page.version;
+	if (!v?.number) return '';
+	return [String(v.number), v.author && `by ${v.author}`, v.createdAt && `on ${v.createdAt}`].filter(Boolean).join(' ');
 }
 
 export function curatePagesJson(pages) {
@@ -82,8 +117,14 @@ export function plainPageView(page) {
 	console.log(`${page.id} ${page.title}`);
 	if (page.spaceId) console.log(`Space ID: ${page.spaceId}`);
 	console.log(`Status: ${page.status || 'current'}`);
-	if (page.version?.number) console.log(`Version: ${page.version.number}`);
+	if (page.version?.number) console.log(`Version: ${versionText(page)}`);
 	if (page.createdAt) console.log(`Created: ${page.createdAt}`);
+	if (page.ancestors?.length) console.log(`Ancestors: ${breadcrumb(page)}`);
+	if (page.labels?.length) console.log(`Labels: ${page.labels.join(', ')}`);
+	if (page.children) {
+		console.log(`Children: ${page.children.length}`);
+		for (const c of page.children) console.log(`  ${c.id} "${c.title}"`);
+	}
 	const body = storageToText(page.body?.storage?.value);
 	if (body) console.log(`Content:\n${body}`);
 }
@@ -134,8 +175,14 @@ export function formatPageView(page) {
 	field('Page ID', page.id);
 	if (page.spaceId) field('Space ID', page.spaceId);
 	field('Status', page.status || 'current');
-	if (page.version?.number) field('Version', page.version.number);
+	if (page.version?.number) field('Version', versionText(page));
 	if (page.createdAt) field('Created', new Date(page.createdAt).toLocaleString());
+	if (page.ancestors?.length) field('Ancestors', breadcrumb(page));
+	if (page.labels?.length) field('Labels', page.labels.join(', '));
+	if (page.children) {
+		heading(`Child pages (${page.children.length})`);
+		for (const c of page.children) console.log(`  ${pc.dim(c.id)} ${c.title}`);
+	}
 
 	const body = storageToText(page.body?.storage?.value);
 	if (body) {

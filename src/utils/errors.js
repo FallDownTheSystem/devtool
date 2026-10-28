@@ -59,6 +59,15 @@ export function handleError(err, context = '') {
 		return;
 	}
 
+	// fetch rejects with a TimeoutError from AbortSignal.timeout, axios (jira.js) with ECONNABORTED.
+	if (err.name === 'TimeoutError' || err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
+		error('The request timed out: the server did not answer in time.');
+		if (context) error(`Endpoint: ${context}`);
+		error('Check the base URL and your access, or allow more time with DEV_TIMEOUT=<seconds> (default 30).');
+		process.exitCode = 1;
+		return;
+	}
+
 	if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND') {
 		error(`Could not connect to server.`);
 		if (context) error(`URL: ${context}`);

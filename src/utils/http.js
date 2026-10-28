@@ -1,5 +1,18 @@
 import { apiErrorDetail } from './errors.js';
 
+const DEFAULT_TIMEOUT_SECONDS = 30;
+
+// Every API request gives up after DEV_TIMEOUT seconds (default 30), so a stalled server fails with a
+// clear message instead of hanging the command.
+export function requestTimeout() {
+	const seconds = Number(process.env.DEV_TIMEOUT);
+	return (Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_TIMEOUT_SECONDS) * 1000;
+}
+
+export function timeoutSignal() {
+	return AbortSignal.timeout(requestTimeout());
+}
+
 // Fetch options for a JSON API call; a body is sent as JSON.
 export function jsonInit({ method = 'GET', headers = {}, body } = {}) {
 	return {
@@ -10,6 +23,7 @@ export function jsonInit({ method = 'GET', headers = {}, body } = {}) {
 			...(body !== undefined && { 'Content-Type': 'application/json' }),
 		},
 		body: body === undefined ? undefined : JSON.stringify(body),
+		signal: timeoutSignal(),
 	};
 }
 
