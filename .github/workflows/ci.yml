@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  # Release PRs touch only these files and are merged by release.yml within
+  # seconds of opening, so a run queued for one fails to load its deleted
+  # merge ref. release.yml validates before publishing, and CI still runs on
+  # the resulting push to master.
+  pull_request:
+    paths-ignore:
+      - CHANGELOG.md
+      - package.json
+      - .release-please-manifest.json
+  push:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The engines floor and the version releases publish with.
+        node: ['22.12', '24']
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Tests
+        run: npm test

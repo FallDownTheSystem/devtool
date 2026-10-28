@@ -83,3 +83,28 @@ Clients do not read config; commands pass the resolved connection in. Per-site c
 - **Confluence** (`clients/confluence.js`): Cloud or Server/Data Center, detected per origin
 - **Service Desk** (`clients/serviceDesk.js`): the Jira Cloud client, with comments through the Service Desk API as before
 - **Microsoft Graph** (`clients/graph.js`, `clients/graph-auth.js`, `clients/graph-cache.js`): delegated MSAL sign-in; the token cache is an AES-256-GCM file per tenant and client ID whose key lives in the OS credential store (`@napi-rs/keyring`), with a lock file spanning MSAL's read-modify-write; `commands/graph.js` builds the auth and client per invocation from the resolved connection
+
+## Release & CI Automation
+
+Releases are automated with [release-please](https://github.com/googleapis/release-please-action), set up like the converse repository. **Do not bump the version in `package.json`, run `npm publish`, edit the top of `CHANGELOG.md`, or create `vX.Y.Z` tags by hand**; the automation owns them, along with `.release-please-manifest.json`.
+
+### Commit messages
+
+Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `perf:`, `refactor:`, `docs:`, `test:`, `chore:`, `deps:` appear in the changelog; `ci:` and `build:` are hidden. A push whose commits are all hidden types releases nothing. History before `bootstrap-sha` (the 0.11.0 commit) is not read; remove `bootstrap-sha` from `release-please-config.json` once a `v*` release tag exists.
+
+### How releases work
+
+- `.github/workflows/release.yml` runs on every push to `master`. In one run, release-please opens or updates a `chore(master): release X.Y.Z` PR with the version bump and changelog entry, the workflow squash-merges it, release-please runs again to tag `vX.Y.Z` and create the GitHub release, and the workflow runs `npm ci` and `npm test` and publishes with `npm publish --access public`.
+- `always-bump-patch` makes every release a patch release, whatever the commit types. For a minor or major release, add a `Release-As: X.Y.Z` footer to a commit body.
+- Publishing uses npm Trusted Publishing (OIDC): no `NPM_TOKEN`; the `id-token: write` permission and a trusted publisher on npmjs.com (repository `FallDownTheSystem/devtool`, workflow `release.yml`) authenticate it. It needs npm >= 11.5.1, so the workflow installs npm 11.
+- Running the workflow by hand with `publish_current` publishes the current `master` version, to recover a tagged but unpublished release.
+
+### Dependabot
+
+- `.github/dependabot.yml` checks npm and GitHub Actions daily at 06:00 UTC. Minor and patch updates are grouped into one PR per ecosystem; majors get their own PR. Commits use the `deps:` prefix.
+- `.github/workflows/dependabot-auto-merge.yml` approves and auto-merges minor and patch PRs, then dispatches the release workflow, so each merged update publishes a patch release. Major updates get a `needs-review` label and a comment, and wait for a human.
+- Do not run `npm update` or bump dependencies by hand unless something urgent cannot wait for Dependabot.
+
+### CI
+
+`.github/workflows/ci.yml` runs `npm test` on Node 22.12 (the engines floor) and 24 for every PR and push to `master`. The tests make no real API calls and never touch the OS credential store.

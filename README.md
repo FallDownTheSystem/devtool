@@ -379,6 +379,8 @@ npm test
 
 The Node.js test suite uses mock Graph and authentication responses, temporary configuration, and local download fixtures. It does not access Microsoft 365 data.
 
+Releases are automated: every push to `master` with a user-facing [Conventional Commit](https://www.conventionalcommits.org/) publishes a patch release to npm through release-please, and Dependabot's minor and patch updates merge and release on their own. See [CLAUDE.md](CLAUDE.md#release--ci-automation).
+
 ## License
 
 ISC
