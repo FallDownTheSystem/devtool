@@ -45,7 +45,23 @@ dev config show              # all connections (tokens masked)
 dev config set <key> <value> # set a single field, e.g. work.baseUrl
 ```
 
-Most commands have short aliases: `ls`, `read`, `find`, `my`. `dev sd` has the same `view` options and `fields` command as `dev jira`.
+Most commands have short aliases: `ls`, `read`, `find`, `my`.
+
+### Jira Cloud and Server/Data Center
+
+`dev jira` works with Jira Cloud (including Service Desk) and Jira Server/Data Center, like `dev confluence` does for Confluence. The connection's site decides the format: Cloud takes ADF and account IDs, Server takes wiki markup and user names. The deployment is detected (an `atlassian.net` host or a `serverInfo` answer of `Cloud` is Cloud; a connection without an email is Server, which signs in with a personal access token), or set it with `dev config set <connection>.deployment cloud|server`.
+
+List the project keys of each site on its connection, and an issue key picks the connection by itself:
+
+```bash
+dev config set work.projects PROJ,OPS        # Jira Server
+dev config set cloud.projects SQTUKI         # Jira Cloud
+dev jira view SQTUKI-12320                   # uses "cloud" without --connection
+```
+
+A connection's default project counts too. A key that matches no connection uses the default Jira connection; `--connection` always wins. Commands without an issue key (`search`, `mine`, `queues`) take `--project <key>` to pick the connection.
+
+On Cloud, `dev jira comment add` writes an internal comment unless `--public`; `dev jira queues` and `dev jira queue <name>` read Service Desk queues and fail on a project without one. `dev sd` (alias `servicedesk`) is kept for existing notes and scripts: it has the same commands and, without a project match, uses the default `serviceDesk` connection. Pending actions held as `sd.*` by earlier versions can still be approved.
 
 ### Raw reads: `dev api`
 
@@ -152,7 +168,7 @@ Pending actions expire after 24 hours. Approval checks again that the connection
 Text can be given inline or with `--file <path>` (`-` reads standard input), which keeps multi-line text out of shell quoting. Comment listings show comment IDs.
 
 ```bash
-# Jira Server (dev jira) and Service Desk Cloud (dev sd) share these commands
+# Jira Cloud and Server/Data Center (dev jira; dev sd is an alias)
 dev jira create --summary "Fix login" --type Bug --project PROJ -d "Steps..."
 dev jira edit PROJ-1 --summary "New" --labels a,b --assignee jdoe --field customfield_10010=5
 dev jira edit PROJ-1 --unassign
@@ -162,8 +178,11 @@ dev jira transition PROJ-1 "In Progress"     # by transition name, ID, or target
 dev jira comment add PROJ-1 "text"           # or --file notes.txt
 dev jira comment edit PROJ-1 <commentId> "text"
 dev jira comment delete PROJ-1 <commentId>
-dev sd comment add TUKI-1 "text"             # internal note by default
-dev sd comment add TUKI-1 "text" --public    # reply visible to the customer
+dev jira comment add TUKI-1 "text"           # Cloud: internal note by default
+dev jira comment add TUKI-1 "text" --public  # Cloud: reply visible to the customer
+dev jira worklog list PROJ-1                 # worklogs (read)
+dev jira worklog add PROJ-1 "1h 30m" --started 2026-10-28 -m "Review" [--remaining 2h | --keep-remaining]
+dev jira worklog delete PROJ-1 <worklogId>
 
 # Bitbucket
 dev pr create --title "Add X" --source feature/x [--destination main] [-d "..."] [--reviewer <accountId>]
@@ -187,7 +206,7 @@ dev confluence comment add 12345 "Looks good" --text
 dev confluence comment delete <commentId>
 ```
 
-Jira Server takes wiki markup and user names; Service Desk (Jira Cloud) takes plain text, which is converted to paragraphs, and account IDs for `--assignee`.
+Text is plain text on Jira Cloud, converted to paragraphs, and wiki markup on Server/Data Center; `--assignee` is an account ID on Cloud and a user name on Server. The approval preview of an edit shows each changed field's current value next to the new one. `worklog add` starts now by default; a date alone starts at 09:00 local time. It reduces the remaining estimate by the time logged unless `--remaining` or `--keep-remaining` is given; Tempo on Jira Server records worklogs made through this API.
 
 `--field <name>=<value>` takes a field ID or display name (`--field Account=23533`, `--field "Story Points=5"`). Before anything is held or sent, the field is looked up in the create metadata (create) or edit metadata (edit) and the value is converted to what its schema expects: text and plugin fields get a string, numbers a number, option and select fields `{"id": ...}` for an allowed value (matched by value, name, or ID) or `{"value": ...}`, user fields the user reference of the site, and array fields a comma-separated list. JSON (`{...}`, `[...]`, a quoted `"..."`, or `null`) is sent unchanged, e.g. `--field 'customfield_1={"value":"High"}'`. A value that does not fit, a field that is not on the screen, or a required field missing on create fails with the field's name, type, and some allowed values. The approval preview shows each field as `Name (id)` with the value that is sent. `dev jira fields` lists the fields and their types.
 
@@ -196,9 +215,9 @@ Jira Server takes wiki markup and user names; Service Desk (Jira Cloud) takes pl
 Stored via the `conf` package in your OS config directory. Each connection has a type and its own fields:
 
 - **bitbucket**: workspace, default repo, email, app password
-- **jira**: base URL, API token, default project
+- **jira**: base URL, email (Cloud; on Server/Data Center empty for a personal access token, or a username for Basic auth), API token, default project, project keys, deployment (optional)
 - **confluence**: base URL, email, API token, default space. Cloud and Server/Data Center are detected from the base URL. For Server/Data Center, include any context path (`https://company.com/confluence`) and leave the email empty to use a personal access token, or set it to your username for Basic auth.
-- **serviceDesk**: base URL, email, API token, default project
+- **serviceDesk**: base URL, email, API token, default project, project keys (a Jira Cloud connection; kept for `dev sd`)
 - **graph**: tenant ID, client ID, default SharePoint site (see [Microsoft Graph](#microsoft-graph))
 
 Bitbucket, Jira, Confluence, and Service Desk connections also have the `allowWrite` and `requireApproval` settings (see [Writing](#writing)).

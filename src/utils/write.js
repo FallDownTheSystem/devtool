@@ -11,7 +11,8 @@ const PENDING_EXIT_CODE = 2;
 
 // An action is the unit that is held for approval and later run from its stored parameters:
 //   name     registry key, e.g. 'jira.comment.add'
-//   type     connection type
+//   type     connection type, or a list of the types it works with
+//   route    optional (input) => an issue or project key that picks the connection without --connection
 //   prepare  optional (connection, input) => params; validates, resolves defaults, and reads what `run`
 //            needs, so approval runs exactly the change that was shown
 //   preview  optional (connection, params) => extra params; reads current state for the approval
@@ -160,10 +161,10 @@ export async function runWrite(cmd, action, buildInput) {
 	const mode = getOutputMode(cmd);
 	const { approve, replaces } = cmd.optsWithGlobals();
 	try {
-		const connection = connectionFor(cmd, action.type);
+		const input = buildInput();
+		const connection = connectionFor(cmd, action.type, action.route?.(input));
 		assertWritable(connection);
 		if (replaces) getPending(replaces);
-		const input = buildInput();
 		let params = action.prepare ? await action.prepare(connection, input) : input;
 		if (!setting(connection, 'requireApproval') || approve) {
 			// Claimed before the request so the old action cannot be approved meanwhile; it was never sent,

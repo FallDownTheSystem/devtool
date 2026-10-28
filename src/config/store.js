@@ -19,6 +19,19 @@ export function validateGraphSite(value) {
 	return 'Enter a SharePoint Online site URL without a query or fragment.';
 }
 
+function projectKeys(value) {
+	return (value || '').split(',').map((k) => k.trim().toUpperCase()).filter(Boolean);
+}
+
+// Issue keys in these projects (and the default project) use this connection when no --connection is given.
+const PROJECTS_FIELD = {
+	title: 'Projects',
+	message: 'Project keys on this site, comma-separated (optional; issues in them use this connection)',
+	placeholder: 'PROJ,OPS',
+	validate: (v) => (projectKeys(v).every((k) => /^[A-Z][A-Z0-9_]*$/.test(k)) ? undefined : 'Enter project keys such as PROJ,OPS.'),
+	normalize: (v) => projectKeys(v).join(','),
+};
+
 // A field's `validate` returns a problem message for a non-empty value; `normalize` runs on every save.
 // A type with a `writeTarget` has write commands, gated per connection by `settings`; the field it names
 // identifies the site that writes go to.
@@ -37,9 +50,18 @@ export const types = {
 		title: 'Jira',
 		writeTarget: 'baseUrl',
 		fields: {
-			baseUrl: { title: 'Base URL', message: 'Jira Server base URL', placeholder: 'https://jira.company.com', required: true },
-			token: { title: 'Token', message: 'Jira Personal Access Token', secret: true, required: true },
+			baseUrl: { title: 'Base URL', message: 'Jira base URL (Cloud: https://<site>.atlassian.net; Server/Data Center: with any context path)', placeholder: 'https://jira.company.com', required: true },
+			email: { title: 'Email', message: 'Jira Cloud account email (Server/Data Center: empty for a personal access token, or your username for Basic auth)', placeholder: 'you@company.com' },
+			token: { title: 'Token', message: 'Jira API token (Server/Data Center: personal access token or password)', secret: true, required: true },
 			defaultProject: { title: 'Default project', message: 'Jira default project key', placeholder: 'PROJ' },
+			projects: PROJECTS_FIELD,
+			deployment: {
+				title: 'Deployment',
+				message: 'cloud or server (optional; detected when empty)',
+				placeholder: 'detect',
+				validate: (v) => (['cloud', 'server'].includes(v.trim().toLowerCase()) ? undefined : 'Enter cloud or server, or leave it empty to detect it.'),
+				normalize: (v) => v.trim().toLowerCase(),
+			},
 		},
 	},
 	confluence: {
@@ -60,6 +82,7 @@ export const types = {
 			email: { title: 'Email', message: 'Service Desk account email', placeholder: 'you@company.com', required: true },
 			token: { title: 'Token', message: 'Service Desk API token', secret: true, required: true },
 			defaultProject: { title: 'Default project', message: 'Service Desk default project key', placeholder: 'TUKI' },
+			projects: PROJECTS_FIELD,
 		},
 	},
 	graph: {
@@ -187,19 +210,36 @@ function requireIndex(connections, ref) {
 	return index;
 }
 
-export function getConnection(type, ref) {
+function servesProject(connection, project) {
+	const wanted = project.toUpperCase();
+	return projectKeys(connection.projects).includes(wanted) || connection.defaultProject?.toUpperCase() === wanted;
+}
+
+// `type` is a connection type or a list of them, in order of preference for the default. Without `ref`,
+// a `project` key picks the connection whose projects or default project include it.
+export function getConnection(type, ref, project) {
 	const connections = listConnections();
-	const { title } = types[type];
+	const allowed = [type].flat();
+	const title = allowed.map((t) => types[t].title).join(' or ');
 	if (ref) {
 		const connection = connections[requireIndex(connections, ref)];
-		if (connection.type !== type) {
+		if (!allowed.includes(connection.type)) {
 			throw new Error(`Connection "${ref}" is a ${types[connection.type].title} connection, not ${title}.`);
 		}
 		return connection;
 	}
-	const index = defaultIndex(connections, type);
-	if (index === -1) throw new Error(`No ${title} connection configured. Run \`dev config add ${type}\` to add one.`);
-	return connections[index];
+	if (project) {
+		const matches = connections.filter((c) => allowed.includes(c.type) && servesProject(c, project));
+		if (matches.length > 1) {
+			throw new Error(`Project ${project.toUpperCase()} is listed on several connections (${matches.map(label).join(', ')}). Pass --connection, or remove it from all but one.`);
+		}
+		if (matches.length) return matches[0];
+	}
+	for (const t of allowed) {
+		const index = defaultIndex(connections, t);
+		if (index !== -1) return connections[index];
+	}
+	throw new Error(`No ${title} connection configured. Run \`dev config add ${allowed[0]}\` to add one.`);
 }
 
 export function resolveIndex(ref) {

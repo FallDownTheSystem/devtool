@@ -1,8 +1,7 @@
 import { Command } from 'commander';
 import * as bitbucket from '../clients/bitbucket.js';
-import * as jira from '../clients/jira.js';
+import { site } from '../clients/jira.js';
 import * as confluence from '../clients/confluence.js';
-import * as serviceDesk from '../clients/serviceDesk.js';
 import { listConnections, resolveIndex, types } from '../config/store.js';
 import { apiUrl, relativePath, parseQuery, select, parseSelect, nextPageUrl, collectAllPages } from '../utils/api.js';
 import { apiError, timeoutSignal } from '../utils/http.js';
@@ -10,14 +9,21 @@ import { handleError } from '../utils/errors.js';
 import { getOutputMode } from '../utils/mode.js';
 import { collect } from '../utils/write.js';
 
-const clients = { bitbucket, jira, confluence, serviceDesk };
+// A Jira connection reaches Server/Data Center or Cloud, and its site decides the client.
+const jira = { apiTarget: async (connection) => (await site(connection)).client.apiTarget(connection) };
+const clients = { bitbucket, jira, confluence, serviceDesk: jira };
 
 // The only POST requests `dev api` sends. Each endpoint takes its query in the body and changes nothing;
 // every write goes through the write commands and their approval flow instead.
 export const READ_ONLY_POST = {
 	bitbucket: [],
-	// JQL search; the POST form takes long JQL in the body and returns the same result as GET.
-	jira: ['/rest/api/2/search'],
+	jira: [
+		// JQL search; the POST form takes long JQL in the body and returns the same result as GET.
+		'/rest/api/2/search',
+		// Jira Cloud: the enhanced JQL search, and the count of issues a query matches.
+		'/rest/api/3/search/jql',
+		'/rest/api/3/search/approximate-count',
+	],
 	confluence: [],
 	serviceDesk: [
 		// Enhanced JQL search; the POST form of GET /rest/api/3/search/jql, for long queries.

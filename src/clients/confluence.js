@@ -1,27 +1,9 @@
-import { jsonInit, apiError, timeoutSignal } from '../utils/http.js';
-
-const deployments = new Map();
-
-// Custom domains hide the atlassian.net hostname, so anything else is probed:
-// Atlassian's edge answers tenant_info anonymously, Server/Data Center does not.
-async function detectDeployment(origin) {
-	if (/\.atlassian\.net$/i.test(new URL(origin).hostname)) return 'cloud';
-	try {
-		const res = await fetch(new URL('/_edge/tenant_info', origin), {
-			headers: { 'Accept': 'application/json' },
-			signal: timeoutSignal(),
-		});
-		if (res.ok && (await res.json()).cloudId) return 'cloud';
-	} catch {
-		// An unreachable or non-JSON probe means no Atlassian edge; the real request reports connection errors.
-	}
-	return 'server';
-}
+import { jsonInit, apiError } from '../utils/http.js';
+import { deploymentOf } from '../utils/deployment.js';
 
 async function connect({ baseUrl, email, token }) {
 	const base = new URL(baseUrl);
-	if (!deployments.has(base.origin)) deployments.set(base.origin, detectDeployment(base.origin));
-	const kind = await deployments.get(base.origin);
+	const kind = await deploymentOf(base.origin);
 	// Cloud always serves Confluence under /wiki; Server/Data Center keeps its own context path.
 	const path = kind === 'cloud' ? '/wiki' : base.pathname.replace(/\/+$/, '');
 	return { kind, origin: base.origin, path, email, token };
@@ -106,6 +88,7 @@ function serverPage(page) {
 		title: page.title,
 		status: page.status,
 		spaceId: page.space?.id != null ? String(page.space.id) : undefined,
+		...(page.space?.key && { space: { key: page.space.key, ...(page.space.name && { name: page.space.name }) } }),
 		createdAt: page.history?.createdDate,
 		version: page.version ? {
 			number: page.version.number,
@@ -142,6 +125,7 @@ export async function listSpaces(connection) {
 // in one more request.
 async function cloudPageDetails(conn, page) {
 	const ancestorIds = (await paginate(conn, `/api/v2/pages/${page.id}/ancestors`)).map((a) => String(a.id));
+	const space = page.spaceId ? await request(conn, apiUrl(conn, `/api/v2/spaces/${page.spaceId}`)).catch(() => null) : null;
 	const titles = new Map();
 	if (ancestorIds.length) {
 		const found = await request(conn, apiUrl(conn, '/api/v2/pages'), { id: ancestorIds.join(','), limit: 250 });
@@ -149,6 +133,7 @@ async function cloudPageDetails(conn, page) {
 	}
 	return {
 		...page,
+		...(space && { space: { key: space.key, name: space.name } }),
 		version: page.version && { ...page.version, author: page.version.authorId },
 		labels: (page.labels?.results || []).map((l) => l.name),
 		ancestors: ancestorIds.map((ancestor) => ({ id: ancestor, title: titles.get(ancestor) ?? null })),

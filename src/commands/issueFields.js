@@ -4,16 +4,15 @@ import { getOutputMode, outputJson } from '../utils/mode.js';
 import { connectionFor } from '../utils/connection.js';
 import { metaList } from '../utils/jiraFields.js';
 import { curateFieldMetaJson, plainFieldMeta, formatFieldMeta } from '../formatters/issueFields.js';
+import { site } from '../clients/jira.js';
 
 export const VIEW_FIELDS_HELP = 'Also show these fields, by ID or display name (comma-separated, case-insensitive)';
 export const VIEW_ALL_FIELDS_HELP = 'Show every non-empty field with its ID and display name';
 
-// `fields <key>` shows what an edit can set; `fields --create` shows what a create needs. Shared by
-// Jira Server (`dev jira`) and Service Desk Cloud (`dev sd`).
-export function addIssueFieldsCommand(parent, { dialect, noun }) {
-	const { type, client } = dialect;
+// `fields <key>` shows what an edit can set; `fields --create` shows what a create needs.
+export function addIssueFieldsCommand(parent, { types }) {
 	parent.command('fields [key]')
-		.description(`List the fields you can set on ${noun} (edit metadata), or with --create the fields a new one takes, with type, required flag, and allowed values`)
+		.description('List the fields you can set on an issue (edit metadata), or with --create the fields a new one takes, with type, required flag, and allowed values')
 		.option('--create', 'Show the create metadata of a project and issue type instead')
 		.option('-p, --project <key>', 'Project for --create (default: the connection\'s default project)')
 		.option('-t, --type <name>', 'Issue type name or ID for --create', 'Task')
@@ -27,7 +26,8 @@ Examples:
 			const mode = getOutputMode(this);
 			const s = mode === 'rich' ? spinner('Fetching field metadata...').start() : null;
 			try {
-				const connection = connectionFor(this, type);
+				const connection = connectionFor(this, types, opts.create ? opts.project : key);
+				const { client } = await site(connection);
 				let list;
 				let title;
 				if (opts.create) {

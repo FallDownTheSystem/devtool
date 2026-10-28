@@ -1,5 +1,5 @@
 import { heading, field, table, pc } from '../utils/output.js';
-import { standardRows, allowedLabel, typeLabel } from '../utils/jiraFields.js';
+import { standardRows, allowedLabel, typeLabel, isEmpty } from '../utils/jiraFields.js';
 
 // The issue view lines shared by Jira Server and Service Desk: the standard fields that are set, and the
 // fields asked for with --fields or --all-fields.
@@ -9,9 +9,22 @@ function shortValue(value) {
 	return value.length > 300 ? `${value.slice(0, 297)}...` : value;
 }
 
+// Fields the view already shows on their own line when they have a value; --fields and --all-fields
+// do not print them again.
+const VIEW_FIELDS = new Set([
+	'summary', 'status', 'priority', 'issuetype', 'assignee', 'reporter', 'labels', 'components', 'created', 'updated', 'description',
+	'resolution', 'resolutiondate', 'timetracking', 'fixVersions', 'duedate', 'parent',
+]);
+
+function notShown(f, extra) {
+	return extra.filter((e) => !(VIEW_FIELDS.has(e.id) && !isEmpty(f[e.id]) && e.value !== null));
+}
+
 export function plainExtras(f, extra) {
 	for (const [label, value] of standardRows(f)) console.log(`${label}: ${value}`);
 	if (!extra) return;
+	extra = notShown(f, extra);
+	if (!extra.length) return;
 	console.log('Fields:');
 	for (const e of extra) console.log(`  ${e.name}${e.name !== e.id ? ` (${e.id})` : ''}: ${shortValue(e.value)}`);
 }
@@ -19,6 +32,8 @@ export function plainExtras(f, extra) {
 export function richExtras(f, extra) {
 	for (const [label, value] of standardRows(f)) field(label, value);
 	if (!extra) return;
+	extra = notShown(f, extra);
+	if (!extra.length) return;
 	heading('Fields');
 	for (const e of extra) field(`${e.name}${e.name !== e.id ? ` ${pc.dim(`(${e.id})`)}` : ''}`, e.value === null ? pc.dim('(empty)') : shortValue(e.value));
 }

@@ -44,6 +44,8 @@ const samples = {
 	tenantId: '11111111-1111-1111-1111-111111111111',
 	clientId: '22222222-2222-2222-2222-222222222222',
 	defaultSite: 'https://example.sharepoint.com/sites/Test',
+	projects: 'PROJ,OPS',
+	deployment: 'cloud',
 };
 
 test('legacy config set keys create and update the unnamed connection of each type', () => {
@@ -109,7 +111,7 @@ test('commands run without any configuration and report only the missing connect
 	assert.match(run('show'), /No connections configured/);
 	const { status, output } = dev('jira', 'view', 'PROJ-1');
 	assert.equal(status, 1);
-	assert.match(output, /No Jira connection configured\. Run `dev config add jira`/);
+	assert.match(output, /No Jira or Service Desk connection configured\. Run `dev config add jira`/);
 	assert.doesNotMatch(output, /setup|Bitbucket/i);
 });
 

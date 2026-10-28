@@ -350,6 +350,48 @@ test('a stalled request fails with a timeout instead of hanging', async () => {
 	assert.match(viaSdk.output, /timed out/);
 });
 
+test('a held edit shows the current value of each field it changes', async () => {
+	jira({ allowWrite: true });
+	respond = (r) => {
+		if (r.path.endsWith('/editmeta')) return [200, { fields: { customfield_2: { name: 'Story Points', schema: { type: 'number' } } } }];
+		return [200, { key: 'PROJ-1', fields: { summary: 'Old title', description: 'Old line one\nOld line two', customfield_2: 3 } }];
+	};
+	const held = await dev('jira', 'edit', 'PROJ-1', '--summary', 'New title', '--description', 'New text', '--field', 'Story Points=5', '--json');
+	assert.equal(held.status, 2, held.output);
+	const { details } = JSON.parse(held.output);
+	assert.equal(details.Summary, 'Old title → New title');
+	assert.equal(details['Story Points (customfield_2)'], '3 → 5');
+	assert.equal(details['Description (current)'], 'Old line one\nOld line two');
+	assert.equal(details['Description (new)'], 'New text');
+	assert.deepEqual(writes(), []);
+});
+
+test('work is logged with the time, start, and estimate held for approval', async () => {
+	jira({ allowWrite: true });
+	respond = (r) => r.method === 'GET'
+		? [200, { key: 'PROJ-1', fields: { summary: 'S', timetracking: { remainingEstimate: '4h' } } }]
+		: [201, { id: '77' }];
+	const held = await dev('jira', 'worklog', 'add', 'PROJ-1', '1h 30m', '--started', '2026-10-28 13:30', '-m', 'Review', '--remaining', '2h', '--json');
+	assert.equal(held.status, 2, held.output);
+	const pending = JSON.parse(held.output);
+	assert.equal(pending.summary, 'Log 1h 30m on PROJ-1');
+	assert.match(pending.details.Started, /^2026-10-28T13:30:00\.000[+-]\d{4}$/);
+	assert.equal(pending.details['Remaining estimate'], 'set to 2h (now 4h)');
+	const approved = await dev('pending', 'approve', pending.id, '--plain');
+	assert.equal(approved.status, 0, approved.output);
+	const [post] = writes();
+	assert.equal(post.path, '/rest/api/2/issue/PROJ-1/worklog?adjustEstimate=new&newEstimate=2h');
+	assert.deepEqual({ ...post.body, started: undefined }, { timeSpent: '1h 30m', comment: 'Review', started: undefined });
+	assert.match((await dev('jira', 'worklog', 'add', 'PROJ-1', 'soon')).output, /not a Jira duration/);
+});
+
+test('a requested field the view already shows is not printed twice', async () => {
+	jira();
+	respond = () => [200, { key: 'PROJ-1', names: { timetracking: 'Time tracking' }, fields: { summary: 'S', timetracking: { originalEstimate: '1d' } } }];
+	const { output } = await dev('jira', 'view', 'PROJ-1', '--fields', 'Time tracking', '--plain');
+	assert.equal(output.match(/original 1d/g).length, 1, output);
+});
+
 test('a held comment edit previews the current text read by ID', async () => {
 	jira({ allowWrite: true });
 	respond = () => [200, { id: '5', author: { displayName: 'Ann' }, body: 'Old text' }];

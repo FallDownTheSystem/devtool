@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createServer } from 'node:http';
 import { coerceFieldValue, findField, readable, requestedFields, metaList, missingRequired, collectPages } from '../src/utils/jiraFields.js';
-import { getCreateMeta as serverCreateMeta } from '../src/clients/jira.js';
+import { getCreateMeta as serverCreateMeta } from '../src/clients/jiraServer.js';
 import { getCreateMeta as cloudCreateMeta } from '../src/clients/serviceDesk.js';
 
 const server = { user: (name) => ({ name }) };

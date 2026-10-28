@@ -122,7 +122,7 @@ test('server pages and page view are reshaped to the Cloud fields', async (t) =>
 	});
 	connection.baseUrl = origin;
 	const expected = {
-		id: '42', title: 'Runbook', status: 'current', spaceId: '7',
+		id: '42', title: 'Runbook', status: 'current', spaceId: '7', space: { key: 'DEV' },
 		createdAt: '2024-01-02T03:04:05.000Z', version: { number: 3 },
 		body: { storage: { value: '<p>Hello</p>' } },
 	};

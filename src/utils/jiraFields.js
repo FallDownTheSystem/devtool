@@ -109,9 +109,16 @@ function allowed(meta, text) {
 
 const NAMED = new Set(['priority', 'resolution', 'issuetype', 'version', 'component', 'securitylevel']);
 
-function single(meta, type, text, user) {
+// Multi-line text fields take the site's rich-text format (ADF on Jira Cloud).
+function isRichText(meta) {
+	const schema = meta.schema || {};
+	return ['description', 'environment'].includes(schema.system) || /:textarea$/.test(schema.custom || '');
+}
+
+function single(meta, type, text, { user, text: rich }) {
 	switch (type) {
 		case 'string':
+			return rich && isRichText(meta) ? rich(text) : text;
 		case 'date':
 		case 'datetime':
 			return text;
@@ -141,8 +148,9 @@ function single(meta, type, text, user) {
 	}
 }
 
-// Converts the text of a `--field` to the API value its schema expects. `user` is the dialect's mapping.
-export function coerceFieldValue(meta, raw, { user }) {
+// Converts the text of a `--field` to the API value its schema expects. `user` and `text` map a user
+// reference and plain text to the site's format.
+export function coerceFieldValue(meta, raw, format) {
 	if (EXPLICIT_JSON.test(raw)) {
 		try {
 			return JSON.parse(raw);
@@ -156,9 +164,9 @@ export function coerceFieldValue(meta, raw, { user }) {
 	if (schema.custom && !schema.custom.startsWith('com.atlassian.') && schema.type !== 'array') return raw;
 	if (schema.type === 'array') {
 		const items = raw.split(',').map((s) => s.trim()).filter(Boolean);
-		return items.map((text) => single(meta, schema.items || 'string', text, user));
+		return items.map((text) => single(meta, schema.items || 'string', text, format));
 	}
-	return single(meta, schema.type, raw, user);
+	return single(meta, schema.type, raw, format);
 }
 
 // Required fields without a default that `fields` does not set. Jira fills in the project and issue type

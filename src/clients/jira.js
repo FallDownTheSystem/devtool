@@ -1,187 +1,51 @@
-import { Version2Client } from 'jira.js';
-import { requestTimeout } from '../utils/http.js';
-import { collectPages, pickIssueType } from '../utils/jiraFields.js';
+import * as server from './jiraServer.js';
+import * as cloud from './jiraCloud.js';
+import * as serviceDesk from './serviceDesk.js';
+import { textToAdf } from '../utils/markup.js';
+import { timeoutSignal } from '../utils/http.js';
 
-const clients = new Map();
+// `dev jira` works with both connection types: `jira` (Cloud or Server/Data Center) and `serviceDesk`
+// (always Cloud). The site decides the client and the format of rich text and user references.
+export const JIRA_TYPES = ['jira', 'serviceDesk'];
 
-function getClient({ baseUrl, token }) {
-	const key = `${baseUrl}\n${token}`;
-	if (!clients.has(key)) {
-		const client = new Version2Client({
-			host: baseUrl,
-			authentication: {
-				basic: { email: '', apiToken: token },
-			},
-			baseRequestConfig: { timeout: requestTimeout() },
+const deployments = new Map();
+
+// serverInfo answers anonymously on both deployments and names the deployment type.
+async function probe(baseUrl) {
+	try {
+		const res = await fetch(new URL(`${baseUrl.replace(/\/+$/, '')}/rest/api/2/serverInfo`), {
+			headers: { 'Accept': 'application/json' },
+			redirect: 'manual',
+			signal: timeoutSignal(),
 		});
-		client.instance.interceptors.request.use((config) => {
-			config.headers['Authorization'] = `Bearer ${token}`;
-			return config;
-		});
-		clients.set(key, client);
+		if (res.ok && (await res.json()).deploymentType === 'Cloud') return 'cloud';
+	} catch {
+		// An unreachable or non-JSON answer: the real request reports the problem.
 	}
-	return clients.get(key);
+	return 'server';
 }
 
-export async function getIssue(connection, issueKey) {
-	return getClient(connection).issues.getIssue({
-		issueIdOrKey: issueKey,
-		fields: ['*all'],
-		expand: 'renderedFields,names',
-	});
+// 'cloud' or 'server'. A connection's `deployment` setting wins. Jira Cloud authenticates with an
+// email and API token, so a connection without an email is Server/Data Center and needs no probe.
+export async function deployment(connection) {
+	if (connection.type === 'serviceDesk') return 'cloud';
+	if (connection.deployment) return connection.deployment;
+	if (/\.atlassian\.net$/i.test(new URL(connection.baseUrl).hostname)) return 'cloud';
+	if (!connection.email) return 'server';
+	if (!deployments.has(connection.baseUrl)) deployments.set(connection.baseUrl, probe(connection.baseUrl));
+	return deployments.get(connection.baseUrl);
 }
 
-export async function getIssueComments(connection, issueKey) {
-	const result = await getClient(connection).issueComments.getComments({
-		issueIdOrKey: issueKey,
-		orderBy: 'created',
-		maxResults: 100,
-	});
-	return result.comments || [];
-}
+const SERVER = { cloud: false, client: server, text: (value) => value, user: (name) => ({ name }) };
+const CLOUD = { cloud: true, client: cloud, text: textToAdf, user: (accountId) => ({ accountId }) };
 
-export async function searchIssues(connection, jql, startAt = 0, maxResults = 50) {
-	const result = await getClient(connection).issueSearch.searchForIssuesUsingJql({
-		jql,
-		startAt,
-		maxResults,
-		fields: ['key', 'summary', 'status', 'assignee', 'priority', 'updated'],
-	});
-	return {
-		issues: result.issues || [],
-		total: result.total || 0,
-		startAt: result.startAt || 0,
-		maxResults: result.maxResults || maxResults,
-	};
-}
-
-export async function getMyIssues(connection) {
-	const project = connection.defaultProject;
-	const jql = project
-		? `project = ${project} AND assignee = currentUser() AND status != Done ORDER BY updated DESC`
-		: `assignee = currentUser() AND status != Done ORDER BY updated DESC`;
-	return searchIssues(connection, jql);
-}
-
-export async function getTransitions(connection, issueKey) {
-	const result = await getClient(connection).issues.getTransitions({ issueIdOrKey: encodeURIComponent(issueKey) });
-	return result.transitions || [];
-}
-
-export async function createIssue(connection, fields) {
-	return getClient(connection).issues.createIssue({ fields });
-}
-
-export async function editIssue(connection, issueKey, fields) {
-	await getClient(connection).issues.editIssue({ issueIdOrKey: encodeURIComponent(issueKey), fields });
-}
-
-export async function deleteIssue(connection, issueKey, deleteSubtasks = false) {
-	await getClient(connection).issues.deleteIssue({ issueIdOrKey: encodeURIComponent(issueKey), deleteSubtasks });
-}
-
-export async function transitionIssue(connection, issueKey, transitionId) {
-	await getClient(connection).issues.doTransition({
-		issueIdOrKey: encodeURIComponent(issueKey),
-		transition: { id: transitionId },
-	});
-}
-
-export async function getComment(connection, issueKey, id) {
-	return getClient(connection).issueComments.getComment({ issueIdOrKey: encodeURIComponent(issueKey), id });
-}
-
-export async function addComment(connection, issueKey, body) {
-	return getClient(connection).issueComments.addComment({ issueIdOrKey: encodeURIComponent(issueKey), comment: body });
-}
-
-export async function updateComment(connection, issueKey, id, body) {
-	return getClient(connection).issueComments.updateComment({ issueIdOrKey: encodeURIComponent(issueKey), id, comment: body });
-}
-
-export async function deleteComment(connection, issueKey, id) {
-	await getClient(connection).issueComments.deleteComment({ issueIdOrKey: encodeURIComponent(issueKey), id });
-}
-
-// The base URL and authentication that `dev api` sends raw read requests with.
-export function apiTarget({ baseUrl, token }) {
-	return { base: new URL(baseUrl), headers: { 'Authorization': `Bearer ${token}` } };
-}
-
-async function get(connection, path, params) {
-	return (await getClient(connection).instance.get(path, { params })).data;
-}
-
-export async function getFields(connection) {
-	return get(connection, '/rest/api/2/field');
-}
-
-export async function getEditMeta(connection, issueKey) {
-	return (await get(connection, `/rest/api/2/issue/${encodeURIComponent(issueKey)}/editmeta`)).fields || {};
-}
-
-const versions = new Map();
-
-async function majorVersion(connection) {
-	if (!versions.has(connection.baseUrl)) {
-		versions.set(connection.baseUrl, get(connection, '/rest/api/2/serverInfo').then((info) => info.versionNumbers?.[0] ?? parseInt(info.version, 10)));
-	}
-	return versions.get(connection.baseUrl);
-}
-
-// Jira 9 removed the expand form of createmeta in favor of paged per-project, per-type endpoints;
-// earlier versions have only the expand form. `issueType` is { id } or { name }.
-export async function getCreateMeta(connection, project, issueType) {
-	const base = `/rest/api/2/issue/createmeta/${encodeURIComponent(project)}/issuetypes`;
-	if (await majorVersion(connection) >= 9) {
-		const types = await collectPages((startAt) => get(connection, base, { startAt }), (data) => data.values);
-		const type = pickIssueType(types, issueType, project);
-		const fields = await collectPages((startAt) => get(connection, `${base}/${encodeURIComponent(type.id)}`, { startAt }), (data) => data.values);
-		return { issueType: type, fields };
-	}
-	const data = await get(connection, '/rest/api/2/issue/createmeta', {
-		[/^\d+$/.test(project) ? 'projectIds' : 'projectKeys']: project,
-		expand: 'projects.issuetypes.fields',
-	});
-	const found = data.projects?.[0];
-	if (!found) throw new Error(`Project ${project} was not found, or you cannot create issues in it.`);
-	const type = pickIssueType(found.issuetypes || [], issueType, project);
-	return { issueType: type, fields: type.fields || {} };
-}
-
-export async function getIssueChildren(connection, issueKey) {
-	const issue = await getIssue(connection, issueKey);
-	const type = issue.fields.issuetype?.name;
-	const parent = { key: issue.key, type, summary: issue.fields.summary };
-
-	if (type === 'Epic') {
-		const response = await getClient(connection).instance.get(
-			`/rest/agile/1.0/epic/${encodeURIComponent(issueKey)}/issue`,
-			{
-				params: {
-					fields: 'summary,status,assignee,priority,updated,issuetype',
-					maxResults: 100,
-				},
-			}
-		);
-		const data = response.data;
-		return {
-			issues: data.issues || [],
-			total: data.total ?? (data.issues || []).length,
-			startAt: data.startAt || 0,
-			maxResults: data.maxResults || 100,
-			parent,
-			source: 'epic',
-		};
-	}
-
-	const subtasks = issue.fields.subtasks || [];
-	return {
-		issues: subtasks,
-		total: subtasks.length,
-		startAt: 0,
-		maxResults: subtasks.length,
-		parent,
-		source: 'subtasks',
-	};
+// The client and value formats of a connection's site:
+//   cloud    whether the site is Jira Cloud (ADF, account IDs, token-paged search, public replies)
+//   client   jiraServer.js or jiraCloud.js (serviceDesk.js for serviceDesk connections)
+//   text     maps plain text to the API's rich-text value
+//   user     maps a user reference (user name or account ID) to the API's user value
+export async function site(connection) {
+	if (await deployment(connection) === 'server') return SERVER;
+	if (!connection.email) throw new Error('Jira Cloud signs in with your account email and an API token. Set the email of this connection with `dev config edit <connection>`.');
+	return connection.type === 'serviceDesk' ? { ...CLOUD, client: serviceDesk } : CLOUD;
 }

@@ -37,6 +37,8 @@ export function curatePageJson(page) {
 		id: page.id,
 		title: page.title,
 		spaceId: page.spaceId || null,
+		spaceKey: page.space?.key || null,
+		spaceName: page.space?.name || null,
 		status: page.status || null,
 		createdAt: page.createdAt || null,
 		version: page.version?.number || null,
@@ -67,6 +69,10 @@ export function plainAttachments(attachments) {
 export function formatAttachments(attachments) {
 	if (attachments.length === 0) { console.log(pc.dim('  No attachments.')); return; }
 	console.log(table(['ID', 'Name', 'Size', 'Media type'], attachments.map((a) => [a.id, a.title, sizeText(a.fileSize), a.mediaType || ''])));
+}
+
+function spaceText(page) {
+	return page.space.name ? `${page.space.key} (${page.space.name})` : page.space.key;
 }
 
 function breadcrumb(page) {
@@ -115,7 +121,8 @@ export function plainSpaces(spaces) {
 
 export function plainPageView(page) {
 	console.log(`${page.id} ${page.title}`);
-	if (page.spaceId) console.log(`Space ID: ${page.spaceId}`);
+	if (page.space) console.log(`Space: ${spaceText(page)}`);
+	else if (page.spaceId) console.log(`Space ID: ${page.spaceId}`);
 	console.log(`Status: ${page.status || 'current'}`);
 	if (page.version?.number) console.log(`Version: ${versionText(page)}`);
 	if (page.createdAt) console.log(`Created: ${page.createdAt}`);
@@ -173,7 +180,8 @@ export function formatPageView(page) {
 	heading(`${page.title}`);
 	divider();
 	field('Page ID', page.id);
-	if (page.spaceId) field('Space ID', page.spaceId);
+	if (page.space) field('Space', spaceText(page));
+	else if (page.spaceId) field('Space ID', page.spaceId);
 	field('Status', page.status || 'current');
 	if (page.version?.number) field('Version', versionText(page));
 	if (page.createdAt) field('Created', new Date(page.createdAt).toLocaleString());

@@ -33,7 +33,7 @@ src/
   config/pending.js # Pending write actions awaiting approval, one JSON file each under <config dir>/pending
   clients/          # API clients; every exported function takes the connection object as its first argument
   actions/          # Write actions (prepare/summary/details/run/report); index.js is the registry by action name
-  commands/         # Commander subcommands (config, pr, jira, confluence, sd, pending, api); issueWrites.js and issueFields.js add the write and `fields` commands shared by jira and sd
+  commands/         # Commander subcommands (config, pr, jira, confluence, pending, api); jira.js builds `dev jira` and its alias `dev sd`, with issueWrites.js and issueFields.js
   formatters/       # Output formatting — each has three variants: rich (colored tables), plain (compact text), JSON (curated objects)
   utils/
     output.js       # Shared UI primitives: spinner, table (cli-table3), heading, field, divider, mask
@@ -45,6 +45,7 @@ src/
     http.js         # jsonInit, apiError, and the request timeout (DEV_TIMEOUT), shared by the clients
     api.js          # `dev api`: path validation, the --select projection, pagination across API styles
     jiraFields.js   # Jira field metadata, name resolution, schema-aware --field values, readable field values
+    deployment.js   # Cloud or Server/Data Center detection of a Confluence site, per origin
 ```
 
 ### Writes
@@ -74,7 +75,9 @@ Stored via `conf` package (projectName: `devtool`) as a `connections` array. Eac
 Clients do not read config; commands pass the resolved connection in. Per-site caches are keyed by site, not held as module singletons.
 
 - **Bitbucket** (`clients/bitbucket.js`): Raw fetch against `api.bitbucket.org/2.0`, Basic auth, manual pagination via `next` links
-- **Jira** (`clients/jira.js`): Uses `jira.js` SDK (Version2Client) with Bearer token auth (overrides SDK's built-in Basic auth via request interceptor); one client per base URL and token
+- **Jira** (`clients/jira.js`): `site(connection)` picks the client and value formats (`text`, `user`) for a `jira` or `serviceDesk` connection; the deployment comes from the `deployment` field, the host, the email, or `/rest/api/2/serverInfo`. Issue keys route to the connection whose `projects` or `defaultProject` lists them (`getConnection(types, ref, project)`); actions name the key with `route`.
+- **Jira Server/Data Center** (`clients/jiraServer.js`): `jira.js` SDK (Version2Client); Bearer for a personal access token, Basic when the connection has an email
+- **Jira Cloud** (`clients/jiraCloud.js`): REST v3 and the Service Desk API, Basic auth; comments are internal unless public
 - **Confluence** (`clients/confluence.js`): Cloud or Server/Data Center, detected per origin
-- **Service Desk** (`clients/serviceDesk.js`): Jira Cloud REST v3 and the Service Desk API, Basic auth
+- **Service Desk** (`clients/serviceDesk.js`): the Jira Cloud client, with comments through the Service Desk API as before
 - **Microsoft Graph** (`clients/graph.js`, `clients/graph-auth.js`, `clients/graph-cache.js`): delegated MSAL sign-in; the token cache is an AES-256-GCM file per tenant and client ID whose key lives in the OS credential store (`@napi-rs/keyring`), with a lock file spanning MSAL's read-modify-write; `commands/graph.js` builds the auth and client per invocation from the resolved connection
