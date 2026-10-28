@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Amp orb setup: runs once per snapshot from the repository root.
+# Installs the locked dependencies so `npm test` and `node src/index.js` work
+# immediately. Needs no credentials; none are written into the snapshot.
+set -euo pipefail
+
+node -e '
+const [major, minor] = process.versions.node.split(".").map(Number);
+if (major < 22 || (major === 22 && minor < 12)) {
+	console.error(`Node ${process.versions.node} is below the engines floor 22.12`);
+	process.exit(1);
+}'
+
+for tool in git gh jq; do
+	command -v "$tool" >/dev/null || { echo "Missing required tool: $tool" >&2; exit 1; }
+done
+
+npm ci --no-audit --no-fund
