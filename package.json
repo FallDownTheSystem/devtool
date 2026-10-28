@@ -1,6 +1,6 @@
 {
 	"name": "@falldownthesystem/devtool",
-	"version": "0.7.0",
+	"version": "0.8.0",
 	"description": "CLI for Bitbucket, Jira, Confluence, Service Desk, and Microsoft Graph",
 	"type": "module",
 	"bin": {
@@ -11,7 +11,7 @@
 	],
 	"scripts": {
 		"start": "node src/index.js",
-		"test": "node --test test/config.test.js test/confluence.test.js test/service-desk.test.js test/graph.test.js test/writes.test.js"
+		"test": "node --test test/config.test.js test/confluence.test.js test/service-desk.test.js test/graph.test.js test/writes.test.js test/api.test.js test/fields.test.js"
 	},
 	"keywords": [
 		"cli",
