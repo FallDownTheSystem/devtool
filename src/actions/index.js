@@ -1,8 +1,9 @@
 import * as bitbucket from './bitbucket.js';
 import * as confluence from './confluence.js';
 import * as jira from './jira.js';
+import * as tempo from './tempo.js';
 
-const all = [bitbucket, confluence, jira].flatMap((group) => Object.values(group)).filter((action) => action?.run);
+const all = [bitbucket, confluence, jira, tempo].flatMap((group) => Object.values(group)).filter((action) => action?.run);
 
 // Pending actions store an action name; approving one looks the action up here. Versions before 0.9
 // held Service Desk writes as sd.*; those names map to the merged Jira actions.

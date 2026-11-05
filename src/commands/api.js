@@ -23,6 +23,8 @@ export const READ_ONLY_POST = {
 		// Jira Cloud: the enhanced JQL search, and the count of issues a query matches.
 		'/rest/api/3/search/jql',
 		'/rest/api/3/search/approximate-count',
+		// Tempo Timesheets on Jira Server/Data Center: the worklog search takes its filter in the body.
+		'/rest/tempo-timesheets/4/worklogs/search',
 	],
 	confluence: [],
 	serviceDesk: [
@@ -111,6 +113,7 @@ Examples:
   dev api jira /rest/api/2/search --query jql='project = PROJ' --all-pages --select 'issues[].key'
   dev api serviceDesk /rest/api/3/field --select '[].{id,name,schema}'
   dev api serviceDesk /rest/api/3/search/jql --post '{"jql":"project = TUKI","fields":["summary"]}'
+  dev api jira /rest/tempo-timesheets/4/worklogs/search --post '{"from":"2026-11-02","to":"2026-11-06","worker":["JIRAUSER38404"]}'
   dev api confluence /rest/api/content/123 --query expand=version,ancestors,metadata.labels
   dev api confluence /api/v2/spaces --all-pages --select 'results[].key'
   dev api bitbucket /repositories/my-workspace/my-repo/pullrequests --query state=MERGED

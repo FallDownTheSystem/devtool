@@ -33,6 +33,37 @@ const PROJECTS_FIELD = {
 	normalize: (v) => projectKeys(v).join(','),
 };
 
+// Tempo Cloud's documented API hosts: the global default, then the EU and Americas regions. A host of
+// another region than the customer's data answers with an authorization error.
+export const TEMPO_CLOUD_HOSTS = ['https://api.tempo.io', 'https://api.eu.tempo.io', 'https://api.us.tempo.io'];
+
+export function validateClockTime(value) {
+	return /^([01]?\d|2[0-3]):[0-5]\d$/.test(value?.trim() || '') ? undefined : 'Enter a time as HH:MM, e.g. 09:00.';
+}
+
+// Tempo Timesheets on the Jira site of the connection. The defaults apply to `dev tempo worklog add`
+// when its options leave them out; an attribute without a default is left out of the worklog.
+const TEMPO_FIELDS = {
+	tempoToken: { title: 'Tempo token', message: 'Tempo Cloud API token (optional; Jira Cloud only: Tempo > Settings > API integration)', secret: true },
+	tempoApiUrl: {
+		title: 'Tempo API',
+		message: `Tempo Cloud API host (optional; default ${TEMPO_CLOUD_HOSTS[0]}; use the host of your data region)`,
+		placeholder: TEMPO_CLOUD_HOSTS[0],
+		// The Tempo token is sent to this host, so only Tempo's own hosts are accepted.
+		validate: (v) => (TEMPO_CLOUD_HOSTS.includes(v.trim().replace(/\/+$/, '').toLowerCase()) ? undefined : `Enter one of ${TEMPO_CLOUD_HOSTS.join(', ')}.`),
+		normalize: (v) => v.trim().replace(/\/+$/, '').toLowerCase(),
+	},
+	tempoStart: {
+		title: 'Tempo start',
+		message: 'Start time of Tempo worklogs, HH:MM (optional; default 09:00)',
+		placeholder: '09:00',
+		validate: validateClockTime,
+		normalize: (v) => v.trim().padStart(5, '0'),
+	},
+	tempoWageType: { title: 'Tempo wage type', message: 'Default Tempo Wage Type code (optional)', placeholder: 'W001', normalize: (v) => v.trim() },
+	tempoPricing: { title: 'Tempo pricing', message: 'Default Tempo Pricing Multiplier code (optional)', placeholder: 'PM001', normalize: (v) => v.trim() },
+};
+
 // A field's `validate` returns a problem message for a non-empty value; `normalize` runs on every save.
 // A type with a `writeTarget` has write commands, gated per connection by `settings`; the field it names
 // identifies the site that writes go to.
@@ -63,6 +94,7 @@ export const types = {
 				validate: (v) => (['cloud', 'server'].includes(v.trim().toLowerCase()) ? undefined : 'Enter cloud or server, or leave it empty to detect it.'),
 				normalize: (v) => v.trim().toLowerCase(),
 			},
+			...TEMPO_FIELDS,
 		},
 	},
 	confluence: {
@@ -84,6 +116,7 @@ export const types = {
 			token: { title: 'Token', message: 'Service Desk API token', secret: true, required: true },
 			defaultProject: { title: 'Default project', message: 'Service Desk default project key', placeholder: 'TUKI' },
 			projects: PROJECTS_FIELD,
+			...TEMPO_FIELDS,
 		},
 	},
 	graph: {

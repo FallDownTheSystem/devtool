@@ -58,7 +58,7 @@ pending.command('show <id>')
 			}
 			if (mode === 'rich') heading(`[${entry.id}] ${description.summary}`);
 			else console.log(`[${entry.id}] ${description.summary}`);
-			printDetails([['Connection', entry.connection], ...Object.entries(description.details), ['Expires', entry.expiresAt]], mode);
+			printDetails([['Connection', entry.connection], ...actionOf(entry).details(entry.params), ['Expires', entry.expiresAt]], mode);
 		} catch (err) {
 			handleError(err, 'pending show');
 		}

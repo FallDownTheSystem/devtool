@@ -77,7 +77,7 @@ dev api bitbucket /repositories/my-workspace/my-repo/pullrequests --query state=
 
 - `<connection>` is a connection name, or a type for its default connection, as with `--connection`.
 - `<path>` is relative to the connection's base URL: the site for Jira and Service Desk, `/wiki` on Confluence Cloud or the context path on Server/Data Center, and `https://api.bitbucket.org/2.0` for Bitbucket. Absolute and scheme-relative URLs, `.`/`..` segments (also percent-encoded), and backslashes are rejected, and redirects are not followed, so credentials only go to the connection's own site.
-- **Read-only.** Requests are GET. `--post '<json>'` is accepted only for a short list of POST endpoints that only read (JQL search: Jira `/rest/api/2/search`, Jira Cloud `/rest/api/3/search/jql` and `/rest/api/3/search/approximate-count`). Writes go through the write commands and their approval flow.
+- **Read-only.** Requests are GET. `--post '<json>'` is accepted only for a short list of POST endpoints that only read (JQL search: Jira `/rest/api/2/search`, Jira Cloud `/rest/api/3/search/jql` and `/rest/api/3/search/approximate-count`; the Tempo worklog search on Jira Server/Data Center, `/rest/tempo-timesheets/4/worklogs/search`). Writes go through the write commands and their approval flow.
 - Output is JSON, indented by default and compact with `--plain` or `--json`. `--raw` prints the body unchanged; non-JSON bodies print as text.
 - `--select` projects the JSON: dot paths (`issues.0.key`), `[]` for each item of an array or each value of an object (`issues[].key`), and `{a,b.c}` to pick keys (`issues[].{key,fields.summary}`; keys are named by the path as written).
 - `--all-pages` follows `startAt`/`maxResults`/`total` (Jira), `nextPageToken`/`isLast` (Jira Cloud), `_links.next` (Confluence, Service Desk API), and `next` (Bitbucket), up to `--limit` items (default 1,000). Without it, one page is returned and standard error shows how to get the next.
@@ -210,14 +210,39 @@ Text is plain text on Jira Cloud, converted to paragraphs, and wiki markup on Se
 
 `--field <name>=<value>` takes a field ID or display name (`--field Account=23533`, `--field "Story Points=5"`). Before anything is held or sent, the field is looked up in the create metadata (create) or edit metadata (edit) and the value is converted to what its schema expects: text and plugin fields get a string, numbers a number, option and select fields `{"id": ...}` for an allowed value (matched by value, name, or ID) or `{"value": ...}`, user fields the user reference of the site, and array fields a comma-separated list. JSON (`{...}`, `[...]`, a quoted `"..."`, or `null`) is sent unchanged, e.g. `--field 'customfield_1={"value":"High"}'`. A value that does not fit, a field that is not on the screen, or a required field missing on create fails with the field's name, type, and some allowed values. The approval preview shows each field as `Name (id)` with the value that is sent. `dev jira fields` lists the fields and their types.
 
+### Tempo worklogs
+
+`dev jira worklog` writes core Jira worklogs, which cannot carry Tempo's work attributes. `dev tempo worklog` logs time through Tempo itself, with the Work Type, Wage Type, Pricing Multiplier, and (on Cloud) billable hours. It uses a `jira` or `serviceDesk` connection, picked as in `dev jira`: `--connection`, the project of the issue key, or the default.
+
+```bash
+dev tempo attributes                                   # the work attributes and their allowed codes (read)
+dev tempo worklog list --from 2026-11-02 --to 2026-11-06 [--worker JIRAUSER38404]   # with a total per day (read)
+dev tempo worklog add SQTDEV-12822 --date 2026-11-02 --hours 0.75 -m "Korjaus" --work-type WT025 [--wage-type W001] [--pricing PM001] [--start 09:00]
+dev tempo worklog add --file plan.csv                  # many worklogs, one approval
+dev tempo worklog edit <tempoWorklogId> [--hours 1.5] [--comment "..."] [--work-type WT005] [--date 2026-11-03] [--start 10:00]
+dev tempo worklog delete <tempoWorklogId>
+```
+
+- **Jira Server/Data Center** uses the Tempo Timesheets REST API on the Jira site with the connection's own token. Tempo there ignores billable hours and reports 0 for every worklog, so `list` leaves them out and `--billable-hours` is refused.
+- **Jira Cloud** uses `https://api.tempo.io/4`, which needs its own Tempo API token (Tempo > Settings > API integration): `dev config token <connection> --field tempoToken`. If your Tempo data is in a region, set `tempoApiUrl` to `https://api.eu.tempo.io` or `https://api.us.tempo.io`. `--billable-hours <n>` sets the billable part: the default is all of the time, `0` is non-billable, and a smaller value bills that part and leaves the rest non-billable. Jira Cloud shows Tempo's worklogs as written by "Timesheets by Tempo", so `dev jira worklog list` and `worklogAuthor = currentUser()` do not find them; `dev tempo worklog list` reads them from Tempo.
+
+`add` checks the issue keys and the attribute codes (by code or by name) before anything is held. The start time, Wage Type, and Pricing Multiplier come from the options, else from the connection: `tempoStart` (default `09:00`), `tempoWageType`, and `tempoPricing`; an attribute with neither is left out. `edit` reads the worklog and sends it back with the changed fields; approval refuses if the worklog changed after the preview.
+
+A plan file is CSV or JSON. A CSV without a header has the columns `date,key,hours,comment,worktype`; a header row may name them in any order and add `start`, `wagetype`, `pricing`, and `billable`. A first line with `;` and no `,` uses `;` as the delimiter, as Excel saves it in some locales. Hours take `.` or `,` as the decimal mark. Options such as `--work-type` fill the columns a row leaves empty. Every row and key is checked first, then the whole plan is one approval, shown per day with each day's total. On approval the rows are posted in order, each printed as `date key hours -> ok <id>` or `-> FAILED <reason>`; a failed row does not stop the others, and the command exits with status 1 if any row failed.
+
+```csv
+2026-11-02,SQTDEV-12822,0.75,Korjaus,WT025
+2026-11-02,SQTDEV-12822,6.75,"Development, part 1",WT005
+```
+
 ## Config
 
 Stored via the `conf` package in your OS config directory. Each connection has a type and its own fields:
 
 - **bitbucket**: workspace, default repo, email, app password
-- **jira**: base URL, email (Cloud; on Server/Data Center empty for a personal access token, or a username for Basic auth), API token, default project, project keys, deployment (optional)
+- **jira**: base URL, email (Cloud; on Server/Data Center empty for a personal access token, or a username for Basic auth), API token, default project, project keys, deployment (optional), and the Tempo fields (see [Tempo worklogs](#tempo-worklogs))
 - **confluence**: base URL, email, API token, default space. Cloud and Server/Data Center are detected from the base URL. For Server/Data Center, include any context path (`https://company.com/confluence`) and leave the email empty to use a personal access token, or set it to your username for Basic auth.
-- **serviceDesk**: base URL, email, API token, default project, project keys (a Jira Cloud connection; kept for `dev sd`)
+- **serviceDesk**: base URL, email, API token, default project, project keys, and the Tempo fields (a Jira Cloud connection; kept for `dev sd`)
 - **graph**: tenant ID, client ID, default SharePoint site (see [Microsoft Graph](#microsoft-graph))
 
 Bitbucket, Jira, Confluence, and Service Desk connections also have the `allowWrite` and `requireApproval` settings (see [Writing](#writing)).
@@ -235,6 +260,7 @@ dev config token work                 # hidden prompt; stores the token in the c
 op read op://vault/jira | dev config token work   # or from standard input
 dev config token work --move          # move the token from the config file to the credential store
 dev config token work --remove        # delete it from the credential store
+dev config token work --field tempoToken   # the Tempo Cloud API token (DEV_WORK_TEMPOTOKEN in the environment)
 ```
 
 Storing a token removes it from the config file, which would otherwise be used first. `dev config add` and `dev config edit` offer the credential store when you enter a token. Renaming a connection moves its entry, and removing the connection deletes it. `dev config show` shows where each token comes from, masked.

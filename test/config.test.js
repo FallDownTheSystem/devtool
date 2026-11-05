@@ -46,6 +46,8 @@ const samples = {
 	defaultSite: 'https://example.sharepoint.com/sites/Test',
 	projects: 'PROJ,OPS',
 	deployment: 'cloud',
+	tempoStart: '09:00',
+	tempoApiUrl: 'https://api.eu.tempo.io',
 };
 
 test('legacy config set keys create and update the unnamed connection of each type', () => {

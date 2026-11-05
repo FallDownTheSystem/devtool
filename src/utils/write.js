@@ -20,9 +20,11 @@ const PENDING_EXIT_CODE = 2;
 //   verify   optional (connection, params); runs on approval before anything is sent and throws when
 //            the state the preview showed has changed
 //   summary  (params) => one-line description
-//   details  (params) => [label, text] pairs shown for approval
+//   details  (params) => [label, text, { full }] entries shown for approval; long text is shortened
+//            unless `full`, which is for content that is itself the change, such as a batch's rows
 //   run      (connection, params) => result
-//   report   (result, params) => { message, json }
+//   report   (result, params) => { message, json, failed }; `failed` marks a batch in which some items
+//            failed after others were sent, so the command fails without a retry of the whole action
 
 export function assertWritable(connection) {
 	if (!setting(connection, 'allowWrite')) {
@@ -75,8 +77,8 @@ function excerpt(text) {
 }
 
 export function printDetails(details, mode) {
-	for (const [name, value] of details) {
-		const text = excerpt(String(value));
+	for (const [name, value, options] of details) {
+		const text = options?.full ? String(value) : excerpt(String(value));
 		const title = mode === 'rich' ? pc.dim(`${name}:`) : `${name}:`;
 		if (text.includes('\n')) {
 			console.log(`  ${title}`);
@@ -141,10 +143,11 @@ export async function execute(action, connection, params, mode, { replaced } = {
 		if (s) s.error({ text: `Failed: ${action.summary(params)}` });
 		throw err;
 	}
-	const { message, json } = action.report(result, params);
-	if (s) s.success({ text: message });
+	const { message, json, failed } = action.report(result, params);
+	if (failed) process.exitCode = 1;
+	if (s) s[failed ? 'error' : 'success']({ text: message });
 	if (mode === 'json') {
-		outputJson({ status: 'done', action: action.name, connection: label(connection), result: json, ...(replaced && { replaced }) });
+		outputJson({ status: failed ? 'failed' : 'done', action: action.name, connection: label(connection), result: json, ...(replaced && { replaced }) });
 		return;
 	}
 	if (mode === 'plain') console.log(message);

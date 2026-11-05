@@ -107,6 +107,16 @@ export async function getIssue(connection, issueKey) {
 	});
 }
 
+export async function getIssueBrief(connection, issueKey) {
+	return request(connection, issuePath(issueKey), { fields: 'summary,status' }, {
+		validate: (data) => typeof data.key === 'string' && typeof data.id === 'string',
+	});
+}
+
+export async function getMyself(connection) {
+	return request(connection, '/rest/api/3/myself', {}, { validate: (data) => typeof data.accountId === 'string' });
+}
+
 export async function getIssueComments(connection, issueKey) {
 	const data = await request(connection, issuePath(issueKey, '/comment'), {
 		orderBy: 'created',

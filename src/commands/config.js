@@ -36,9 +36,9 @@ function secretText(connection, key) {
 }
 
 // A token typed at a hidden prompt, or read from standard input so it stays out of the shell history.
-async function readToken(name) {
+async function readToken(name, key) {
 	if (!process.stdin.isTTY) return readFileSync(0, 'utf8').replace(/\r?\n$/, '');
-	const value = await p.password({ message: `Token for connection "${name}"` });
+	const value = await p.password({ message: `${key === 'token' ? 'Token' : key} for connection "${name}"` });
 	if (p.isCancel(value)) throw new Error('Cancelled; nothing was stored.');
 	return value;
 }
@@ -123,33 +123,39 @@ config
 	.description('Store the token of a connection in the OS credential store (Windows Credential Manager, macOS Keychain, Linux Secret Service)')
 	.option('--move', 'Move the token in the config file to the credential store')
 	.option('--remove', 'Remove the token from the credential store')
+	.option('--field <field>', 'The secret field to store, e.g. tempoToken for the Tempo Cloud API token', 'token')
 	.addHelpText('after', `
 Without an option, the token is read from a hidden prompt, or from standard input when it is piped:
   dev config token work
   op read op://vault/jira/token | dev config token work
+  dev config token work --field tempoToken
 
-A token is looked up in the config file first, then in DEV_<CONNECTION>_TOKEN (e.g. DEV_WORK_TOKEN),
-then in the credential store under service "${SERVICE}", account "<connection>.token". Storing a token
-removes it from the config file, which would otherwise take precedence. Renaming a connection moves
-its entry; removing the connection deletes it.`)
+A token is looked up in the config file first, then in DEV_<CONNECTION>_<FIELD> (e.g. DEV_WORK_TOKEN,
+DEV_WORK_TEMPOTOKEN), then in the credential store under service "${SERVICE}", account
+"<connection>.<field>". Storing a token removes it from the config file, which would otherwise take
+precedence. Renaming a connection moves its entries; removing the connection deletes them.`)
 	.action(attempt(async (ref, opts) => {
 		if (opts.move && opts.remove) throw new Error('Give --move or --remove, not both.');
 		const connection = listConnections()[resolveIndex(ref)];
 		const name = label(connection);
-		if (!secretFields(connection.type).includes('token')) {
-			throw new Error(`A ${types[connection.type].title} connection has no token.${connection.type === 'graph' ? ' It signs in with `dev graph login`.' : ''}`);
+		const key = opts.field;
+		const secrets = secretFields(connection.type);
+		if (!secrets.includes(key)) {
+			const graph = connection.type === 'graph' ? ' It signs in with `dev graph login`.' : '';
+			const known = secrets.length ? ` Its secret fields: ${secrets.join(', ')}.` : '';
+			throw new Error(`A ${types[connection.type].title} connection has no ${key}.${known}${graph}`);
 		}
 		if (opts.remove) {
-			const { deleted } = deleteStoredSecret(ref, 'token');
-			success(deleted ? `Removed the token of "${name}" from the credential store` : `The credential store had no token for "${name}"`);
+			const { deleted } = deleteStoredSecret(ref, key);
+			success(deleted ? `Removed the ${key} of "${name}" from the credential store` : `The credential store had no ${key} for "${name}"`);
 			return;
 		}
-		const value = opts.move ? undefined : await readToken(name);
-		if (!opts.move && !value?.trim()) throw new Error('The token is empty; nothing was stored.');
-		const result = storeSecret(ref, 'token', value?.trim());
-		success(`Stored the token of "${name}" in the credential store (service "${SERVICE}", account "${result.account}")`);
-		if (result.removedFromConfig) success('Removed the token from the config file');
-		if (process.env[envName(name, 'token')]) console.log(`Note: ${envName(name, 'token')} is set and is used before the credential store.`);
+		const value = opts.move ? undefined : await readToken(name, key);
+		if (!opts.move && !value?.trim()) throw new Error(`The ${key} is empty; nothing was stored.`);
+		const result = storeSecret(ref, key, value?.trim());
+		success(`Stored the ${key} of "${name}" in the credential store (service "${SERVICE}", account "${result.account}")`);
+		if (result.removedFromConfig) success(`Removed the ${key} from the config file`);
+		if (process.env[envName(name, key)]) console.log(`Note: ${envName(name, key)} is set and is used before the credential store.`);
 	}));
 
 export default config;

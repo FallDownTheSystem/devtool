@@ -9,6 +9,7 @@ import confluenceCmd from './commands/confluence.js';
 import graphCmd from './commands/graph.js';
 import pendingCmd from './commands/pending.js';
 import apiCmd from './commands/api.js';
+import tempoCmd from './commands/tempo.js';
 
 const { version } = createRequire(import.meta.url)('../package.json');
 
@@ -29,6 +30,7 @@ program.addCommand(prCmd);
 program.addCommand(jiraCmd);
 program.addCommand(confluenceCmd);
 program.addCommand(sdCmd);
+program.addCommand(tempoCmd);
 program.addCommand(graphCmd);
 program.addCommand(pendingCmd);
 program.addCommand(apiCmd);

@@ -1,6 +1,6 @@
 import { error } from './output.js';
 
-// Collects the messages from the error bodies of Atlassian APIs: Jira (errorMessages and errors),
+// Collects the messages from the error bodies of Atlassian and Tempo APIs: Jira (errorMessages and errors),
 // Confluence Cloud v2 (errors[].title/detail), Confluence Server and Bitbucket (message or error.message).
 export function apiErrorDetail(data) {
 	if (!data || typeof data !== 'object') return typeof data === 'string' && data.trim() ? data.trim().slice(0, 500) : undefined;
@@ -9,7 +9,8 @@ export function apiErrorDetail(data) {
 	if (data.errors && typeof data.errors === 'object' && !Array.isArray(data.errors)) {
 		messages.push(...Object.entries(data.errors).map(([key, value]) => `${key}: ${value}`));
 	}
-	if (Array.isArray(data.errors)) messages.push(...data.errors.map((e) => [e.title, e.detail].filter(Boolean).join(': ')));
+	// Tempo Cloud puts its text in errors[].message.
+	if (Array.isArray(data.errors)) messages.push(...data.errors.map((e) => [e.title, e.detail].filter(Boolean).join(': ') || e.message));
 	if (data.error?.message) messages.push(data.error.message);
 	if (data.error?.detail) messages.push(data.error.detail);
 	if (typeof data.message === 'string' && !messages.length) messages.push(data.message);

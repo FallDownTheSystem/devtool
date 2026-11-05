@@ -16,7 +16,8 @@ function url(connection, path, params = {}) {
 	return result;
 }
 
-async function request(connection, path, params, { method, body } = {}) {
+// Exported for the Tempo Timesheets client, which shares the site and credentials of the connection.
+export async function request(connection, path, params, { method, body } = {}) {
 	const target = url(connection, path, params);
 	const res = await fetch(target, jsonInit({ method, body, headers: { 'Authorization': authHeader(connection) } }));
 	// Jira answers rejected credentials on some endpoints as an anonymous user with status 200 and says so
@@ -40,6 +41,14 @@ function issuePath(issueKey, suffix = '') {
 
 export async function getIssue(connection, issueKey) {
 	return get(connection, issuePath(issueKey), { fields: '*all', expand: 'renderedFields,names' });
+}
+
+export async function getIssueBrief(connection, issueKey) {
+	return get(connection, issuePath(issueKey), { fields: 'summary,status' });
+}
+
+export async function getMyself(connection) {
+	return get(connection, '/rest/api/2/myself');
 }
 
 export async function getIssueComments(connection, issueKey) {
