@@ -92,12 +92,12 @@ Releases are automated with [release-please](https://github.com/googleapis/relea
 
 ### Commit messages
 
-Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `perf:`, `refactor:`, `docs:`, `test:`, `chore:`, `deps:` appear in the changelog; `ci:` and `build:` are hidden. A push whose commits are all hidden types releases nothing. History before `bootstrap-sha` (the 0.11.0 commit) is not read; remove `bootstrap-sha` from `release-please-config.json` once a `v*` release tag exists.
+Use [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `perf:`, `refactor:`, `docs:`, `test:`, `chore:`, `deps:` appear in the changelog; `ci:` and `build:` are hidden. A push whose commits are all hidden types releases nothing.
 
 ### How releases work
 
 - `.github/workflows/release.yml` runs on every push to `master`. In one run, release-please opens or updates a `chore(master): release X.Y.Z` PR with the version bump and changelog entry, the workflow squash-merges it, release-please runs again to tag `vX.Y.Z` and create the GitHub release, and the workflow runs `npm ci` and `npm test` and publishes with `npm publish --access public`.
-- `always-bump-patch` makes every release a patch release, whatever the commit types. For a minor or major release, add a `Release-As: X.Y.Z` footer to a commit body.
+- The version follows the commit types since the last release: `feat:` bumps the minor version, a breaking change (`feat!:` or a `BREAKING CHANGE:` footer) bumps the major version, even before 1.0, and the other releasing types bump the patch version. To pick a version, add a `Release-As: X.Y.Z` footer to a commit body.
 - Publishing uses npm Trusted Publishing (OIDC): no `NPM_TOKEN`; the `id-token: write` permission and a trusted publisher on npmjs.com (repository `FallDownTheSystem/devtool`, workflow `release.yml`) authenticate it. It needs npm >= 11.5.1, so the workflow installs npm 11.
 - Running the workflow by hand with `publish_current` publishes the current `master` version, to recover a tagged but unpublished release.
 

@@ -1,10 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "release-type": "node",
-  "versioning-strategy": "always-bump-patch",
   "include-v-in-tag": true,
   "include-component-in-tag": false,
-  "bootstrap-sha": "7e38816b66251387fab80e223b08678fb6c69606",
   "bump-minor-pre-major": false,
   "bump-patch-for-minor-pre-major": false,
   "draft": false,
