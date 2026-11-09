@@ -31,11 +31,11 @@
 		"node": ">=22.12"
 	},
 	"dependencies": {
-		"@azure/msal-node": "^7.1.2",
+		"@azure/msal-node": "^7.2.1",
 		"@clack/prompts": "^1.8.1",
 		"@napi-rs/keyring": "^2.1.2",
 		"cli-table3": "^0.6.5",
-		"commander": "^15.0.0",
+		"commander": "^15.1.0",
 		"conf": "^16.0.0",
 		"html-to-text": "^10.0.1",
 		"open": "^11.0.4",
