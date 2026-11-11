@@ -119,7 +119,9 @@ function jira(settings = {}) {
 const tempoWrites = () => requests.filter((r) => r.method !== 'GET' && !r.path.endsWith('/search'));
 
 test('a Server worklog is checked, held with its defaults, and posted as Tempo expects on approval', async () => {
-	jira();
+	// Setup saves a skipped start prompt as empty, which must leave the 09:00 default in place.
+	jira({ tempoStart: '' });
+	assert.equal(store.listConnections()[0].tempoStart, undefined);
 	const held = await dev('tempo', 'worklog', 'add', 'SQTDEV-12822', '--date', '2026-11-02', '--hours', '0,75', '-m', 'Korjaus', '--work-type', 'development', '--json');
 	assert.equal(held.status, 2, held.output);
 	const pending = JSON.parse(held.output);

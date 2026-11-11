@@ -58,7 +58,8 @@ const TEMPO_FIELDS = {
 		message: 'Start time of Tempo worklogs, HH:MM (optional; default 09:00)',
 		placeholder: '09:00',
 		validate: validateClockTime,
-		normalize: (v) => v.trim().padStart(5, '0'),
+		// Pads 9:00 to 09:00; an empty value, as setup saves for a skipped prompt, stays empty.
+		normalize: (v) => v.trim() && v.trim().padStart(5, '0'),
 	},
 	tempoWageType: { title: 'Tempo wage type', message: 'Default Tempo Wage Type code (optional)', placeholder: 'W001', normalize: (v) => v.trim() },
 	tempoPricing: { title: 'Tempo pricing', message: 'Default Tempo Pricing Multiplier code (optional)', placeholder: 'PM001', normalize: (v) => v.trim() },
