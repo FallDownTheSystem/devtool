@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.3](https://github.com/FallDownTheSystem/devtool/compare/v0.12.2...v0.12.3) (2026-11-13)
+
+
+### Dependencies
+
+* **deps:** bump @clack/prompts ([#8](https://github.com/FallDownTheSystem/devtool/issues/8)) ([27ae0f0](https://github.com/FallDownTheSystem/devtool/commit/27ae0f00f8b49c803d614d48bb559b8a5252b0c0))
+
 ## [0.12.2](https://github.com/FallDownTheSystem/devtool/compare/v0.12.1...v0.12.2) (2026-11-11)
 
 
