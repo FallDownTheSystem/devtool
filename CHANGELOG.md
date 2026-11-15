@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/FallDownTheSystem/devtool/compare/v0.12.3...v0.13.0) (2026-11-15)
+
+
+### Features
+
+* add Confluence attachment download and upload, and page drafts ([7c48ba6](https://github.com/FallDownTheSystem/devtool/commit/7c48ba619ce36a6447898e0bb4888205a6e9ceca))
+
 ## [0.12.3](https://github.com/FallDownTheSystem/devtool/compare/v0.12.2...v0.12.3) (2026-11-13)
 
 
