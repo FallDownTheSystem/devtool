@@ -1,8 +1,5 @@
-import { open, rm, lstat, mkdtemp, link } from 'node:fs/promises';
-import { resolve, dirname, join } from 'node:path';
-import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { validateGraphSite } from '../config/store.js';
+import { assertNewPath, saveNewFile, parseTimeout } from '../utils/download.js';
 
 const BASE = 'https://graph.microsoft.com/v1.0';
 const MAIL_FIELDS = 'id,subject,from,toRecipients,receivedDateTime,sentDateTime,isRead,hasAttachments,bodyPreview,webLink,parentFolderId';
@@ -214,50 +211,22 @@ export function createGraphClient({ auth, defaultSite, fetchImpl = fetch }) {
 		listItem: async (list, item, { site } = {}) => request(`/sites/${await siteId(site)}/lists/${graphId(list)}/items/${graphId(item)}`, { $expand: 'fields' }),
 
 		async download(drive, id, destination, { timeout = 120 } = {}) {
-			if (!/^\d+$/.test(String(timeout)) || Number(timeout) < 1 || Number(timeout) > 86400) throw new Error('Download timeout must be 1–86400 seconds.');
-			const milliseconds = Number(timeout) * 1000;
-			try {
-				await lstat(destination);
-				throw Object.assign(new Error('Destination already exists. Choose a new local path.'), { code: 'EEXIST' });
-			} catch (err) {
-				if (err.code !== 'ENOENT') throw err;
+			const milliseconds = parseTimeout(timeout);
+			await assertNewPath(destination);
+			let result = await response(`/drives/${graphId(drive)}/items/${graphId(id)}/content`, {}, { timeout: milliseconds });
+			if (result.status === 302) {
+				const target = new URL(result.headers.get('location'));
+				await result.body?.cancel();
+				if (target.protocol !== 'https:' || !target.hostname.endsWith('.sharepoint.com') || target.username || target.password || target.port) {
+					throw new Error('Refused a download redirect outside SharePoint Online.');
+				}
+				// The download URL already authorizes this request; never forward the Graph bearer token.
+				result = await fetchImpl(target, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(milliseconds) });
 			}
-			const directory = await mkdtemp(join(dirname(resolve(destination)), '.devtool-download-'));
-			const temporary = join(directory, 'content');
-			let failure;
-			try {
-				let result = await response(`/drives/${graphId(drive)}/items/${graphId(id)}/content`, {}, { timeout: milliseconds });
-				if (result.status === 302) {
-					const target = new URL(result.headers.get('location'));
-					await result.body?.cancel();
-					if (target.protocol !== 'https:' || !target.hostname.endsWith('.sharepoint.com') || target.username || target.password || target.port) {
-						throw new Error('Refused a download redirect outside SharePoint Online.');
-					}
-					// The download URL already authorizes this request; never forward the Graph bearer token.
-					result = await fetchImpl(target, { method: 'GET', redirect: 'error', signal: AbortSignal.timeout(milliseconds) });
-				}
-				await check(result);
-				if (!result.body) throw new Error('SharePoint returned no file content.');
-				const file = await open(temporary, 'wx', 0o600);
-				try {
-					await pipeline(Readable.fromWeb(result.body), file.createWriteStream());
-				} finally {
-					await file.close();
-				}
-				// Publish only a complete file. An atomic hard link refuses a concurrently created destination.
-				await link(temporary, destination);
-				return { path: resolve(destination), downloaded: true };
-			} catch (err) {
-				failure = err;
-				throw err;
-			} finally {
-				try {
-					await rm(directory, { recursive: true, force: true });
-				} catch (err) {
-					if (failure) failure.message += ' Temporary download cleanup failed.';
-					else throw new Error('The download is complete, but temporary file cleanup failed.', { cause: err });
-				}
-			}
+			await check(result);
+			if (!result.body) throw new Error('SharePoint returned no file content.');
+			const { path } = await saveNewFile(destination, result.body);
+			return { path, downloaded: true };
 		},
 	};
 }

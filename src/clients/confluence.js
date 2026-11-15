@@ -1,5 +1,6 @@
 import { jsonInit, apiError } from '../utils/http.js';
 import { deploymentOf } from '../utils/deployment.js';
+import { assertNewPath, saveNewFile, parseTimeout } from '../utils/download.js';
 
 async function connect({ baseUrl, email, token }) {
 	const base = new URL(baseUrl);
@@ -34,7 +35,12 @@ function authHeader({ kind, email = '', token = '' }) {
 	return 'Basic ' + Buffer.from(`${email}:${token}`).toString('base64');
 }
 
-async function request(conn, url, params = {}, { method = 'GET', body } = {}) {
+// An upload of a large file outlasts the API timeout, and a timed-out upload has an unknown outcome, which
+// drops its pending action.
+const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
+
+// A `form` is sent as multipart/form-data, which the attachment API takes; its XSRF check needs the token header.
+async function request(conn, url, params = {}, { method = 'GET', body, form } = {}) {
 	if (url.origin !== conn.origin) {
 		throw new Error('Confluence pagination points to a different site. Check the base URL of the Confluence connection.');
 	}
@@ -42,7 +48,11 @@ async function request(conn, url, params = {}, { method = 'GET', body } = {}) {
 		if (v !== undefined && v !== null) url.searchParams.set(k, v);
 	}
 
-	const res = await fetch(url, jsonInit({ method, body, headers: { 'Authorization': authHeader(conn) } }));
+	const headers = { 'Authorization': authHeader(conn) };
+	const init = form
+		? { method, headers: { 'Accept': 'application/json', 'X-Atlassian-Token': 'nocheck', ...headers }, body: form, signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS) }
+		: jsonInit({ method, body, headers });
+	const res = await fetch(url, init);
 	if (!res.ok) throw await apiError('Confluence', res, url);
 	if (res.status === 204) return null;
 
@@ -173,6 +183,93 @@ export async function listAttachments(connection, pageId) {
 	}));
 }
 
+// Cloud serves attachment bytes from Atlassian's media service, through a signed URL.
+function mediaHost(url) {
+	return url.protocol === 'https:'
+		&& (url.hostname === 'media.atlassian.com' || url.hostname.endsWith('.media.atlassian.com'))
+		&& !url.username && !url.password && !url.port;
+}
+
+const MAX_REDIRECTS = 5;
+
+// Redirects within the site keep the credentials; the only other host followed is the media service,
+// which gets no Authorization header because its URL carries its own token. Anything else is refused,
+// so the credentials never reach another host.
+async function downloadResponse(conn, url, milliseconds) {
+	let current = url;
+	let headers = { 'Authorization': authHeader(conn) };
+	for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+		const res = await fetch(current, { headers, redirect: 'manual', signal: AbortSignal.timeout(milliseconds) });
+		if (res.status < 300 || res.status >= 400) {
+			if (!res.ok) {
+				// The media service URL carries a signed token in its query, which must not reach the output.
+				const shown = current.origin === conn.origin ? current : new URL(`${current.origin}${current.pathname}`);
+				throw await apiError('Confluence', res, shown);
+			}
+			if (!res.body) throw new Error('Confluence returned no file content.');
+			return res;
+		}
+		await res.body?.cancel();
+		const location = res.headers.get('location');
+		if (!location) throw new Error('Confluence answered with a redirect that has no location.');
+		const next = new URL(location, current);
+		if (next.origin === conn.origin && headers.Authorization) {
+			// Server/Data Center sends a rejected token to its login page instead of answering 401.
+			if (/\/login\.action$/i.test(next.pathname)) {
+				const err = new Error('Confluence redirected the download to its login page. Check the token of the Confluence connection.');
+				err.url = current.toString();
+				throw err;
+			}
+		} else if (mediaHost(next)) {
+			headers = {};
+		} else {
+			throw new Error(`Refused a download redirect to ${next.origin}, which is neither the Confluence site nor Atlassian's media service.`);
+		}
+		current = next;
+	}
+	throw new Error('Confluence redirected the download too many times.');
+}
+
+async function attachmentSource(conn, id) {
+	if (conn.kind === 'cloud') {
+		const attachment = await request(conn, apiUrl(conn, `/api/v2/attachments/${encodeURIComponent(id)}`));
+		const container = attachment.pageId ?? attachment.blogPostId ?? attachment.customContentId;
+		if (!container) throw new Error(`Attachment ${id} has no page to download it from.`);
+		return {
+			title: attachment.title,
+			url: apiUrl(conn, `/rest/api/content/${encodeURIComponent(container)}/child/attachment/${encodeURIComponent(id)}/download`),
+		};
+	}
+	// Server/Data Center has no REST download; the attachment's download link is a context-relative web path.
+	const attachment = await request(conn, apiUrl(conn, `/rest/api/content/${encodeURIComponent(id)}`));
+	if (attachment.type !== 'attachment' || !attachment._links?.download) throw new Error(`Content ${id} is not an attachment.`);
+	const url = nextUrl(conn, attachment._links.download, apiUrl(conn, '/'));
+	if (url.origin !== conn.origin) throw new Error('The attachment download link points to a different site. Check the base URL of the Confluence connection.');
+	return { title: attachment.title, url };
+}
+
+// Saves an attachment to a new local path; an existing file is never overwritten.
+export async function downloadAttachment(connection, id, destination, { timeout = 120 } = {}) {
+	const milliseconds = parseTimeout(timeout);
+	await assertNewPath(destination);
+	const conn = await connect(connection);
+	const source = await attachmentSource(conn, id);
+	const res = await downloadResponse(conn, source.url, milliseconds);
+	return { id: String(id), title: source.title, ...await saveNewFile(destination, res.body) };
+}
+
+// POST is the call that only adds an attachment; Confluence is reported to refuse a file name the page
+// already has. The version is returned so a caller can tell a new attachment (1) from a replaced one.
+export async function uploadAttachment(connection, pageId, { name, data }) {
+	const conn = await connect(connection);
+	const form = new FormData();
+	form.append('file', new Blob([data]), name);
+	form.append('minorEdit', 'true');
+	const result = await request(conn, apiUrl(conn, `/rest/api/content/${encodeURIComponent(pageId)}/child/attachment`), {}, { method: 'POST', form });
+	const attachment = result.results?.[0] ?? result;
+	return { id: attachment.id, title: attachment.title, version: attachment.version?.number ?? null };
+}
+
 async function cloudSpaceId(conn, { spaceId, spaceKey }) {
 	return spaceId ?? (await request(conn, apiUrl(conn, '/api/v2/spaces'), { keys: spaceKey })).results?.[0]?.id;
 }
@@ -248,6 +345,23 @@ export async function updatePage(connection, id, { title, body, version, message
 		method: 'PUT',
 		body: { id, type: 'page', title, body: serverBody(body), version: next },
 	}));
+}
+
+// 'cloud' or 'server' for the site of a connection.
+export async function deploymentOfConnection(connection) {
+	return (await connect(connection)).kind;
+}
+
+// A draft of a published page always has version 1, and saving one leaves the published version as it is.
+// It replaces the page's unpublished draft. Server/Data Center has no REST API that saves a draft of a
+// published page.
+export async function saveDraft(connection, id, { title, body, message }) {
+	const conn = await connect(connection);
+	if (conn.kind !== 'cloud') throw new Error('Confluence Server/Data Center has no REST API that saves a draft of a published page.');
+	return request(conn, apiUrl(conn, `/api/v2/pages/${id}`), {}, {
+		method: 'PUT',
+		body: { id, status: 'draft', title, body: cloudBody(body), version: { number: 1, message } },
+	});
 }
 
 export async function deletePage(connection, id) {

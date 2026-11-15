@@ -47,6 +47,7 @@ src/
     api.js          # `dev api`: path validation, the --select projection, pagination across API styles
     jiraFields.js   # Jira field metadata, name resolution, schema-aware --field values, readable field values
     deployment.js   # Cloud or Server/Data Center detection of a Confluence site, per origin
+    download.js     # Saves a download to a new local path through a temporary file; never overwrites
     worklogPlan.js  # CSV/JSON plan files of `dev tempo worklog add --file`
 ```
 
@@ -81,7 +82,7 @@ Clients do not read config; commands pass the resolved connection in. Per-site c
 - **Jira** (`clients/jira.js`): `site(connection)` picks the client and value formats (`text`, `user`) for a `jira` or `serviceDesk` connection; the deployment comes from the `deployment` field, the host, the email, or `/rest/api/2/serverInfo`. Issue keys route to the connection whose `projects` or `defaultProject` lists them (`getConnection(types, ref, project)`); actions name the key with `route`.
 - **Jira Server/Data Center** (`clients/jiraServer.js`): REST v2 over fetch; Bearer for a personal access token, Basic when the connection has an email
 - **Jira Cloud** (`clients/jiraCloud.js`): REST v3 and the Service Desk API, Basic auth; comments are internal unless public
-- **Confluence** (`clients/confluence.js`): Cloud or Server/Data Center, detected per origin
+- **Confluence** (`clients/confluence.js`): Cloud or Server/Data Center, detected per origin. Attachment downloads keep the credentials on the site and follow a redirect elsewhere only to `*.media.atlassian.com`, without them; uploads use the v1 multipart POST, which only adds attachments, and report a returned version above 1 as a failure; drafts of published pages (`edit --draft`) are Cloud only
 - **Service Desk** (`clients/serviceDesk.js`): the Jira Cloud client, with comments through the Service Desk API as before
 - **Tempo** (`clients/tempo.js`): `tempo(connection)` picks the client by the site of a `jira` or `serviceDesk` connection. `tempoServer.js` calls the Timesheets plugin on the Jira site with the connection's credentials (through `jiraServer.request`); `tempoCloud.js` calls `TEMPO_CLOUD_HOSTS` with the `tempoToken` secret and uses Jira Cloud for account IDs, issue IDs, and issue keys. Both map worklogs to one shape (`{ id, issueKey, issueId, worker, date, start, seconds, billableSeconds, comment, attributes }`), which the actions in `actions/tempo.js` store and send. A batch add reports `failed` from `report`, so `execute` exits 1 without restoring the action whose other rows were sent.
 - **Microsoft Graph** (`clients/graph.js`, `clients/graph-auth.js`, `clients/graph-cache.js`): delegated MSAL sign-in; the token cache is an AES-256-GCM file per tenant and client ID whose key lives in the OS credential store (`@napi-rs/keyring`), with a lock file spanning MSAL's read-modify-write; `commands/graph.js` builds the auth and client per invocation from the resolved connection

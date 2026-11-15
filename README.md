@@ -33,6 +33,7 @@ dev confluence spaces        # list spaces
 dev confluence view 12345    # read a page, with labels, ancestors, and the version author and date
 dev confluence view 12345 --children   # also list child pages
 dev confluence attachments 12345       # attachment names, sizes, media types, IDs
+dev confluence attachment download <attachmentId> report.pdf   # save to a new local path; never overwrites
 dev confluence pages         # pages in a space
 dev confluence search "auth" # CQL search
 
@@ -200,13 +201,17 @@ dev pr comment delete 42 <commentId>
 dev confluence view 12345 --storage          # current body in storage format
 dev confluence create --title "Notes" --space DEV [--parent 12345] --file page.xhtml
 dev confluence edit 12345 --file page.xhtml [--title "New"] [-m "version comment"]
+dev confluence edit 12345 --file page.xhtml --draft   # save as the page's draft, do not publish (Cloud only)
 dev confluence delete 12345
+dev confluence attachment upload 12345 data.csv [--name data-2026.csv]   # a new attachment name only
 dev confluence comments 12345                # list comments (read)
 dev confluence comment add 12345 "Looks good" --text
 dev confluence comment delete <commentId>
 ```
 
 Text is plain text on Jira Cloud, converted to paragraphs, and wiki markup on Server/Data Center; `--assignee` is an account ID on Cloud and a user name on Server. The approval preview of an edit shows each changed field's current value next to the new one. `worklog add` starts now by default; a date alone starts at 09:00 local time. It reduces the remaining estimate by the time logged unless `--remaining` or `--keep-remaining` is given; Tempo on Jira Server records worklogs made through this API.
+
+`confluence attachment upload` adds a new attachment: a name the page already has fails before anything is held and again at approval, and the upload uses the API call that only adds attachments. If Confluence still stores the file as a new version of an existing attachment, the command reports a failure. The approval stores the file's path and SHA-256; approval fails if the file or the page's attachment names changed after the preview. `confluence attachment download` sends the credentials only to the Confluence site; on Cloud it follows the redirect to Atlassian's media service (`*.media.atlassian.com`, HTTPS) without them, and refuses any other host. `confluence edit --draft` saves the change as the draft of a published page, with version 1, and replaces the page's unpublished draft; the published version does not change. Approval fails if the page was published again after the preview. Server/Data Center has no REST API for drafts of published pages, so `--draft` works on Cloud only.
 
 `--field <name>=<value>` takes a field ID or display name (`--field Account=23533`, `--field "Story Points=5"`). Before anything is held or sent, the field is looked up in the create metadata (create) or edit metadata (edit) and the value is converted to what its schema expects: text and plugin fields get a string, numbers a number, option and select fields `{"id": ...}` for an allowed value (matched by value, name, or ID) or `{"value": ...}`, user fields the user reference of the site, and array fields a comma-separated list. JSON (`{...}`, `[...]`, a quoted `"..."`, or `null`) is sent unchanged, e.g. `--field 'customfield_1={"value":"High"}'`. A value that does not fit, a field that is not on the screen, or a required field missing on create fails with the field's name, type, and some allowed values. The approval preview shows each field as `Name (id)` with the value that is sent. `dev jira fields` lists the fields and their types.
 

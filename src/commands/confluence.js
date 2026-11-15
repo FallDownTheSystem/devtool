@@ -7,6 +7,7 @@ import {
 	listPageComments,
 	listChildPages,
 	listAttachments,
+	downloadAttachment,
 } from '../clients/confluence.js';
 import {
 	formatSpaces, formatPageView, formatPages, formatSearch, formatComments,
@@ -187,8 +188,9 @@ confluence.command('edit <id>')
 	.option('-F, --file <path>', FILE_HELP)
 	.option('--text', TEXT_HELP)
 	.option('-m, --message <text>', 'Version comment')
+	.option('--draft', 'Save the change as the draft of the published page and do not publish it (Cloud only); replaces an unpublished draft')
 	.action(async function (id, opts) {
-		await runWrite(this, actions.pageEdit, () => ({
+		await runWrite(this, opts.draft ? actions.pageDraft : actions.pageEdit, () => ({
 			id, title: opts.title, body: body(opts.body, opts), message: opts.message,
 		}));
 	});
@@ -198,6 +200,34 @@ confluence.command('delete <id>')
 	.description('Delete a page (Cloud moves it to the trash)')
 	.action(async function (id) {
 		await runWrite(this, actions.pageDelete, () => ({ id }));
+	});
+
+const attachment = confluence.command('attachment')
+	.description('Download or upload page attachments; `attachments <pageId>` lists them');
+
+attachment.command('download <attachmentId> <destination>')
+	.description('Download an attachment to a new local path; never overwrite')
+	.option('--timeout <seconds>', 'Per-request download timeout, 1–86400 seconds', '120')
+	.action(async function (id, destination, opts) {
+		const mode = getOutputMode(this);
+		const s = mode === 'rich' ? spinner(`Downloading attachment ${id}...`).start() : null;
+		try {
+			const result = await downloadAttachment(connectionFor(this, 'confluence'), id, destination, opts);
+			const message = `Saved "${result.title}" to ${result.path} (${result.size} bytes)`;
+			if (s) s.success({ text: message });
+			if (mode === 'json') outputJson(result);
+			else if (mode === 'plain') console.log(message);
+		} catch (err) {
+			if (s) s.error({ text: `Failed to download attachment ${id}` });
+			handleError(err, err.url || 'confluence');
+		}
+	});
+
+attachment.command('upload <pageId> <file>')
+	.description('Attach a file to a page under a name the page does not have yet')
+	.option('-n, --name <name>', 'Attachment name (default: the file name)')
+	.action(async function (pageId, file, opts) {
+		await runWrite(this, actions.attachmentUpload, () => ({ pageId, file, name: opts.name }));
 	});
 
 const comment = confluence.command('comment')
