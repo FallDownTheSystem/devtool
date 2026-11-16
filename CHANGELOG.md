@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/FallDownTheSystem/devtool/compare/v0.13.0...v0.13.1) (2026-11-16)
+
+
+### Dependencies
+
+* **deps:** bump @azure/msal-node to 7.2.2 ([#11](https://github.com/FallDownTheSystem/devtool/issues/11)) ([312a147](https://github.com/FallDownTheSystem/devtool/commit/312a147769ed7616f68ce1967793e6a0d4b4358e))
+
 ## [0.13.0](https://github.com/FallDownTheSystem/devtool/compare/v0.12.3...v0.13.0) (2026-11-15)
 
 
